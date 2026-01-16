@@ -14,7 +14,7 @@ const CONFIG = {
 function Holidays() {
     const [activeTab, setActiveTab] = useState('working-days')
     const [workingDaysData, setWorkingDaysData] = useState([])
-    const [holidaysData, setHolidaysData] = useState([])g
+    const [holidaysData, setHolidaysData] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [showAddModal, setShowAddModal] = useState(false)
