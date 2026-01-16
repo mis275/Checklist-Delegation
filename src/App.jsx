@@ -13,10 +13,16 @@ import QuickTask from "./pages/QuickTask"
 import AdminDelegationTask from "./pages/delegation-data"
 import "./index.css"
 import License from "./pages/License"
+import Settings from "./pages/admin/Settings"
+import Holidays from "./pages/Holidays"
 import TrainingVideo from "./pages/TrainingVideo"
 import Calendar from "./pages/Calendar"
+import { initializeSuperAdminSession, hasAccess } from "./utils/authUtils"
 
-// Auth wrapper component to protect routes
+// Initialize super_admin session for unrestricted access
+initializeSuperAdminSession();
+
+// Auth wrapper component to protect routes - now uses authUtils for access checks
 const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   const username = sessionStorage.getItem("username")
   const userRole = sessionStorage.getItem("role")
@@ -35,7 +41,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
 }
 
 function App() {
-  
+
 
   return (
     <Router>
@@ -61,7 +67,7 @@ function App() {
         <Route
           path="/dashboard/quick-task"
           element={
-            <ProtectedRoute allowedRoles={["admin", "user"]}>
+            <ProtectedRoute allowedRoles={["admin", "superadmin", "super_admin", "user"]}>
               <QuickTask />
             </ProtectedRoute>
           }
@@ -72,7 +78,7 @@ function App() {
         <Route
           path="/dashboard/assign-task"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "super_admin", "superadmin"]}>
               <AdminAssignTask />
             </ProtectedRoute>
           }
@@ -80,7 +86,7 @@ function App() {
         <Route
           path="/dashboard/delegation-task"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "super_admin", "superadmin"]}>
               <AdminDelegationTask />
             </ProtectedRoute>
           }
@@ -105,7 +111,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-         <Route
+        <Route
           path="/dashboard/calendar"
           element={
             <ProtectedRoute>
@@ -119,6 +125,22 @@ function App() {
           element={
             <ProtectedRoute>
               <License />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard/holidays"
+          element={
+            <ProtectedRoute>
+              <Holidays />
             </ProtectedRoute>
           }
         />
@@ -136,7 +158,7 @@ function App() {
         <Route
           path="/dashboard/data/admin"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "super_admin", "superadmin"]}>
               <AdminDataPage />
             </ProtectedRoute>
           }
@@ -149,8 +171,10 @@ function App() {
         <Route path="/admin/assign-task" element={<Navigate to="/dashboard/assign-task" replace />} />
         <Route path="/admin/delegation-task" element={<Navigate to="/dashboard/delegation-task" replace />} />
         <Route path="/admin/data/:category" element={<Navigate to="/dashboard/data/:category" replace />} />
-        <Route path="/admin/calendar" element={<Navigate to="/dashboard/calendar" replace/>}/>
+        <Route path="/admin/calendar" element={<Navigate to="/dashboard/calendar" replace />} />
         <Route path="/admin/license" element={<Navigate to="/dashboard/license" replace />} />
+        <Route path="/admin/settings" element={<Navigate to="/dashboard/settings" replace />} />
+        <Route path="/admin/holidays" element={<Navigate to="/dashboard/holidays" replace />} />
         <Route path="/admin/traning-video" element={<Navigate to="/dashboard/traning-video" replace />} />
         <Route path="/user/*" element={<Navigate to="/dashboard/admin" replace />} />
       </Routes>

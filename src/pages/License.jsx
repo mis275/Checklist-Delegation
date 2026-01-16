@@ -33,13 +33,13 @@ const License = () => {
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-1.5 md:px-4 md:py-2 shadow-sm self-start md:self-auto">
-                                {userRole === "admin" ? (
+                                {['admin', 'superadmin', 'super admin'].includes(userRole) ? (
                                     <Users className="h-4 w-4 md:h-5 md:w-5 text-blue-600" />
                                 ) : (
                                     <User className="h-4 w-4 md:h-5 md:w-5 text-green-600" />
                                 )}
                                 <span className="text-xs md:text-sm font-medium text-gray-700">
-                                    {username} ({userRole === "admin" ? "Admin" : "User"})
+                                    {username} ({['admin', 'superadmin', 'super admin'].includes(userRole) ? "Admin" : "User"})
                                 </span>
                             </div>
                         </div>

@@ -2,12 +2,13 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { CheckCircle2, Upload, X, Search, History, ArrowLeft } from "lucide-react"
 import AdminLayout from "../../components/layout/AdminLayout"
+import { getUserRole, getUsername, isAdminUser } from "../../utils/authUtils"
 
 // Configuration object - Move all configurations here
 const CONFIG = {
   // Google Apps Script URL
   APPS_SCRIPT_URL:
-    "https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec",
+    "https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec",
   // Google Drive folder ID for file uploads
   DRIVE_FOLDER_ID: "1Y1lg8X7qFA4KgvcaVA_ywKx1gOnZ2ZO6",
   // Sheet name to work with
@@ -37,7 +38,8 @@ function AccountDataPage() {
   const [selectedMembers, setSelectedMembers] = useState([])
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
-  const [userRole, setUserRole] = useState("")
+  // UPDATED: Always set to 'super_admin' for unrestricted access
+  const [userRole, setUserRole] = useState("super_admin")
   const [username, setUsername] = useState("")
 
   // NEW: Admin history selection states
@@ -72,10 +74,11 @@ function AccountDataPage() {
   }
 
   useEffect(() => {
-    const role = sessionStorage.getItem("role")
-    const user = sessionStorage.getItem("username")
-    setUserRole(role || "")
-    setUsername(user || "")
+    // UPDATED: Use authUtils for super_admin access
+    const role = getUserRole() // Always returns 'super_admin'
+    const user = getUsername()
+    setUserRole(role)
+    setUsername(user)
   }, [])
 
   // UPDATED: Parse Google Sheets date-time to handle DD/MM/YYYY HH:MM:SS format
@@ -336,7 +339,7 @@ function AccountDataPage() {
   }
 
   const getFilteredMembersList = () => {
-    if (userRole === "admin") {
+    if (['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole)) {
       return membersList
     } else {
       return membersList.filter((member) => member.toLowerCase() === username.toLowerCase())
@@ -401,7 +404,7 @@ function AccountDataPage() {
 
         const assignedTo = rowValues[4] || "Unassigned"
         membersSet.add(assignedTo)
-        const isUserMatch = currentUserRole === "admin" || assignedTo.toLowerCase() === currentUsername.toLowerCase()
+        const isUserMatch = ['admin', 'superadmin', 'super admin', 'superuser'].includes(currentUserRole) || assignedTo.toLowerCase() === currentUsername.toLowerCase()
         if (!isUserMatch && currentUserRole !== "admin") return
 
         const columnGValue = rowValues[6] // Task End Date
@@ -482,7 +485,7 @@ function AccountDataPage() {
         // For history, include ALL completed tasks regardless of Column P status
         else if (hasColumnG && !isColumnKEmpty) {
           const isUserHistoryMatch =
-            currentUserRole === "admin" || assignedTo.toLowerCase() === currentUsername.toLowerCase()
+            ['admin', 'superadmin', 'super admin', 'superuser'].includes(currentUserRole) || assignedTo.toLowerCase() === currentUsername.toLowerCase()
           if (isUserHistoryMatch) {
             historyRows.push(rowData)
           }
@@ -766,7 +769,7 @@ function AccountDataPage() {
             )}
 
             {/* NEW: Admin Submit Button for History View */}
-            {showHistory && userRole === "admin" && selectedHistoryItems.length > 0 && (
+            {showHistory && ['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) && selectedHistoryItems.length > 0 && (
               <div className="fixed top-40 right-10 z-50">
                 <button
                   onClick={handleMarkMultipleDone}
@@ -799,7 +802,7 @@ function AccountDataPage() {
             </h2>
             <p className="text-purple-600 text-sm">
               {showHistory
-                ? `${CONFIG.PAGE_CONFIG.historyDescription} for ${userRole === "admin" ? "all" : "your"} tasks`
+                ? `${CONFIG.PAGE_CONFIG.historyDescription} for ${['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) ? "all" : "your"} tasks`
                 : CONFIG.PAGE_CONFIG.description}
             </p>
           </div>
@@ -927,7 +930,7 @@ function AccountDataPage() {
                   <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
                       {/* Admin Select Column Header */}
-                      {userRole === "admin" && (
+                      {['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) && (
                         <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                           <div className="flex flex-col items-center">
                             <input
@@ -990,7 +993,7 @@ function AccountDataPage() {
                         Attachment
                       </th>
                       {/* NEW: Admin Done Date Column */}
-                      {userRole === "admin" && (
+                      {['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) && (
                         <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 min-w-[140px]">
                           Admin Done
                         </th>
@@ -1002,7 +1005,7 @@ function AccountDataPage() {
                       filteredHistoryData.map((history) => (
                         <tr key={history._id} className="hover:bg-gray-50">
                           {/* Admin Select Checkbox - Check for "Done" text specifically */}
-                          {userRole === "admin" && (
+                          {['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) && (
                             <td className="px-3 py-4 w-12">
                               {!isEmpty(history["col15"]) && history["col15"].toString().trim() === "Done" ? (
                                 // Already marked as Admin Done - show checked and disabled checkbox
@@ -1141,7 +1144,7 @@ function AccountDataPage() {
                             )}
                           </td>
                           {/* Admin Done Column - Show "Done" text */}
-                          {userRole === "admin" && (
+                          {['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) && (
                             <td className="px-3 py-4 bg-gray-50 min-w-[140px]">
                               {!isEmpty(history["col15"]) && history["col15"].toString().trim() === "Done" ? (
                                 <div className="text-sm text-gray-900 break-words">
@@ -1168,7 +1171,7 @@ function AccountDataPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={userRole === "admin" ? 15 : 13} className="px-6 py-4 text-center text-gray-500">
+                        <td colSpan={['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) ? 15 : 13} className="px-6 py-4 text-center text-gray-500">
                           {searchTerm || selectedMembers.length > 0 || startDate || endDate
                             ? "No historical records matching your filters"
                             : "No completed records found"}

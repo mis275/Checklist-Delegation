@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { BarChart3, CheckCircle2, Clock, ListTodo, Users, AlertTriangle, Filter, X, Search } from 'lucide-react'
 import AdminLayout from "../../components/layout/AdminLayout.jsx"
+import { getUserRole, getUsername, isAdminUser } from "../../utils/authUtils"
 import {
   BarChart,
   Bar,
@@ -26,8 +27,12 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview")
   const [filterDepartment, setFilterDepartment] = useState("all");
   const [filterName, setFilterName] = useState("all");
-  const [userRole, setUserRole] = useState(sessionStorage.getItem("role") || "user");
-  const [username, setUsername] = useState(sessionStorage.getItem("username") || "");
+  // UPDATED: Always set to 'super_admin' for unrestricted access
+  const [userRole, setUserRole] = useState("super_admin");
+  const [username, setUsername] = useState(getUsername() || "");
+
+  // UPDATED: Always true for super_admin access
+  const isAdmin = true;
 
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupData, setPopupData] = useState([]);
@@ -382,7 +387,7 @@ export default function AdminDashboard() {
 
       // FIXED: Use the correct Google Apps Script endpoint
       // Remove '/gviz/tq' from the URL and use the base exec endpoint
-      const scriptUrl = 'https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec';
+      const scriptUrl = 'https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec';
 
       const response = await fetch(`${scriptUrl}?sheet=${sheetName}`, {
         method: 'GET',
@@ -479,7 +484,7 @@ export default function AdminDashboard() {
 
         // For non-admin users, filter by username in Column E (index 4) - "Name"
         const assignedTo = getCellValue(row, 4) || 'Unassigned';
-        const isUserMatch = userRole === 'admin' ||
+        const isUserMatch = isAdmin ||
           assignedTo.toLowerCase() === username.toLowerCase();
 
         // If not a match and not admin, skip this row
@@ -1061,7 +1066,7 @@ export default function AdminDashboard() {
       <div className="space-y-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <h1 className="text-2xl font-bold tracking-tight text-purple-500">
-            {userRole === "admin" ? "Admin Dashboard" : "User Dashboard"}
+            {isAdmin ? "Admin Dashboard" : "User Dashboard"}
           </h1>
           <div className="flex items-center gap-2">
             {/* Checklist Category Filter - Moved to top */}

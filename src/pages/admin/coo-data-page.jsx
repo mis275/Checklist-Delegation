@@ -2,12 +2,13 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { CheckCircle2, Upload, X, Search, History, ArrowLeft } from "lucide-react"
 import AdminLayout from "../../components/layout/AdminLayout"
+import { getUserRole, getUsername, isAdminUser } from "../../utils/authUtils"
 
 // Configuration object - Move all configurations here
 const CONFIG = {
   // Google Apps Script URL
   APPS_SCRIPT_URL:
-    "https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec",
+    "https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec",
   // Google Drive folder ID for file uploads
   DRIVE_FOLDER_ID: "1Y1lg8X7qFA4KgvcaVA_ywKx1gOnZ2ZO6",
   // Sheet name to work with
@@ -37,7 +38,8 @@ function AccountDataPage() {
   const [selectedMembers, setSelectedMembers] = useState([])
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
-  const [userRole, setUserRole] = useState("")
+  // UPDATED: Always set to 'super_admin' for unrestricted access
+  const [userRole, setUserRole] = useState("super_admin")
   const [username, setUsername] = useState("")
 
   // NEW: Admin history selection states
@@ -72,11 +74,15 @@ function AccountDataPage() {
   }
 
   useEffect(() => {
-    const role = sessionStorage.getItem("role")
-    const user = sessionStorage.getItem("username")
-    setUserRole(role || "")
-    setUsername(user || "")
+    // UPDATED: Use authUtils for super_admin access
+    const role = getUserRole() // Always returns 'super_admin'
+    const user = getUsername()
+    setUserRole(role)
+    setUsername(user)
   }, [])
+
+  // UPDATED: Always true for super_admin access
+  const isAdmin = true;
 
   // UPDATED: Parse Google Sheets date-time to handle DD/MM/YYYY HH:MM:SS format
   const parseGoogleSheetsDateTime = (dateTimeStr) => {
@@ -336,7 +342,7 @@ function AccountDataPage() {
   }
 
   const getFilteredMembersList = () => {
-    if (userRole === "admin") {
+    if (isAdmin) {
       return membersList
     } else {
       return membersList.filter((member) => member.toLowerCase() === username.toLowerCase())
@@ -401,8 +407,8 @@ function AccountDataPage() {
 
         const assignedTo = rowValues[4] || "Unassigned"
         membersSet.add(assignedTo)
-        const isUserMatch = currentUserRole === "admin" || assignedTo.toLowerCase() === currentUsername.toLowerCase()
-        if (!isUserMatch && currentUserRole !== "admin") return
+        const isUserMatch = isAdmin || assignedTo.toLowerCase() === currentUsername.toLowerCase()
+        if (!isUserMatch && !isAdmin) return
 
         const columnGValue = rowValues[6] // Task End Date
         const columnKValue = rowValues[10] // Actual Date
@@ -482,7 +488,7 @@ function AccountDataPage() {
         // For history, include ALL completed tasks regardless of Column P status
         else if (hasColumnG && !isColumnKEmpty) {
           const isUserHistoryMatch =
-            currentUserRole === "admin" || assignedTo.toLowerCase() === currentUsername.toLowerCase()
+            isAdmin || assignedTo.toLowerCase() === currentUsername.toLowerCase()
           if (isUserHistoryMatch) {
             historyRows.push(rowData)
           }
@@ -766,7 +772,7 @@ function AccountDataPage() {
             )}
 
             {/* NEW: Admin Submit Button for History View */}
-            {showHistory && userRole === "admin" && selectedHistoryItems.length > 0 && (
+            {showHistory && isAdmin && selectedHistoryItems.length > 0 && (
               <div className="fixed top-40 right-10 z-50">
                 <button
                   onClick={handleMarkMultipleDone}

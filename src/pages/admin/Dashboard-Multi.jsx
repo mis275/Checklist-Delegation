@@ -35,7 +35,7 @@ export default function AdminDashboard() {
 
   // Apps Script URL - UPDATE THIS WITH YOUR DEPLOYED APPS SCRIPT URL
   const APPS_SCRIPT_URL =
-    "https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec"
+    "https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec"
 
   // State for department data
   const [departmentData, setDepartmentData] = useState({
@@ -299,7 +299,7 @@ export default function AdminDashboard() {
 
       // Fallback to gviz only if Apps Script completely fails
       const response = await fetch(
-        `https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec/gviz/tq?tqx=out:json&sheet=MASTER`
+        `https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec/gviz/tq?tqx=out:json&sheet=MASTER`
       );
 
       if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
@@ -366,7 +366,7 @@ export default function AdminDashboard() {
       // Get user info once
       const username = sessionStorage.getItem("username") || "admin"
       const userRole = sessionStorage.getItem("role") || "admin"
-      const isAdmin = userRole === "admin"
+      const isAdmin = userRole === "admin" || userRole === "superadmin" || userRole === "super_admin"
       const usernameLower = username.toLowerCase()
 
       // Pre-calculate date
@@ -797,7 +797,7 @@ export default function AdminDashboard() {
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-all bg-white">
-            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-blue-50 to-blue-100 rounded-tr-lg p-4">
+            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-linear-to-r from-blue-50 to-blue-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-blue-700">Total Tasks</h3>
               <ListTodo className="h-4 w-4 text-blue-500" />
             </div>
@@ -820,7 +820,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="rounded-lg border border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-all bg-white">
-            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-green-50 to-green-100 rounded-tr-lg p-4">
+            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-linear-to-r from-green-50 to-green-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-green-700">
                 {dashboardType === "delegation" ? "Completed" : "Completed Tasks"}
               </h3>
@@ -837,7 +837,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="rounded-lg border border-l-4 border-l-amber-500 shadow-md hover:shadow-lg transition-all bg-white">
-            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-amber-50 to-amber-100 rounded-tr-lg p-4">
+            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-linear-to-r from-amber-50 to-amber-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-amber-700">
                 {dashboardType === "delegation" ? "Completed" : "Pending Tasks"}
               </h3>
@@ -858,7 +858,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="rounded-lg border border-l-4 border-l-red-500 shadow-md hover:shadow-lg transition-all bg-white">
-            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-red-50 to-red-100 rounded-tr-lg p-4">
+            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-linear-to-r from-red-50 to-red-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-red-700">
                 {dashboardType === "delegation" ? "Completed" : "Overdue Tasks"}
               </h3>
@@ -1022,7 +1022,7 @@ export default function AdminDashboard() {
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-l-4 border-l-purple-500 shadow-md hover:shadow-lg transition-all bg-white">
-            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-purple-50 to-purple-100 rounded-tr-lg p-4">
+            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-linear-to-r from-purple-50 to-purple-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-purple-700">Active Staff</h3>
               <Users className="h-4 w-4 text-purple-500" />
             </div>
@@ -1033,7 +1033,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="rounded-lg border border-l-4 border-l-indigo-500 shadow-md hover:shadow-lg transition-all lg:col-span-3 bg-white">
-            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-gradient-to-r from-indigo-50 to-indigo-100 rounded-tr-lg p-4">
+            <div className="flex flex-row items-center justify-between space-y-0 pb-2 bg-linear-to-r from-indigo-50 to-indigo-100 rounded-tr-lg p-4">
               <h3 className="text-sm font-medium text-indigo-700">Task Completion Rate</h3>
               <BarChart3 className="h-4 w-4 text-indigo-500" />
             </div>
@@ -1049,7 +1049,7 @@ export default function AdminDashboard() {
               </div>
               <div className="w-full h-2 bg-gray-200 rounded-full mt-2">
                 <div
-                  className="h-full bg-gradient-to-r from-green-500 to-amber-500 rounded-full"
+                  className="h-full bg-linear-to-r from-green-500 to-amber-500 rounded-full"
                   style={{ width: `${departmentData.completionRate}%` }}
                 ></div>
               </div>
@@ -1087,7 +1087,7 @@ export default function AdminDashboard() {
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
                 <div className="lg:col-span-4 rounded-lg border border-purple-200 shadow-md bg-white">
-                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+                  <div className="bg-linear-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
                     <h3 className="text-purple-700 font-medium">Tasks Overview</h3>
                     <p className="text-purple-600 text-sm">Task completion rate over time</p>
                   </div>
@@ -1096,7 +1096,7 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <div className="lg:col-span-3 rounded-lg border border-purple-200 shadow-md bg-white">
-                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+                  <div className="bg-linear-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
                     <h3 className="text-purple-700 font-medium">Task Status</h3>
                     <p className="text-purple-600 text-sm">Distribution of tasks by status</p>
                   </div>
@@ -1106,7 +1106,7 @@ export default function AdminDashboard() {
                 </div>
               </div>
               <div className="rounded-lg border border-purple-200 shadow-md bg-white">
-                <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+                <div className="bg-linear-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
                   <h3 className="text-purple-700 font-medium">Staff Task Summary</h3>
                   <p className="text-purple-600 text-sm">Overview of tasks assigned to each staff member</p>
                 </div>
@@ -1120,7 +1120,7 @@ export default function AdminDashboard() {
           {/* Modified MIS Report section with date range filter */}
           {activeTab === "mis" && (
             <div className="rounded-lg border border-purple-200 shadow-md bg-white">
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+              <div className="bg-linear-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
                 <h3 className="text-purple-700 font-medium">MIS Report</h3>
                 <p className="text-purple-600 text-sm">Detailed task analytics and performance metrics</p>
               </div>
@@ -1261,7 +1261,7 @@ export default function AdminDashboard() {
 
           {activeTab === "staff" && (
             <div className="rounded-lg border border-purple-200 shadow-md bg-white">
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+              <div className="bg-linear-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
                 <h3 className="text-purple-700 font-medium">Staff Performance</h3>
                 <p className="text-purple-600 text-sm">
                   Task completion rates by staff member (tasks up to today only)
@@ -1281,7 +1281,7 @@ export default function AdminDashboard() {
                           <>
                             {/* High performers section (70% or above) */}
                             <div className="rounded-md border border-green-200">
-                              <div className="p-4 bg-gradient-to-r from-green-50 to-green-100 border-b border-green-200">
+                              <div className="p-4 bg-linear-to-r from-green-50 to-green-100 border-b border-green-200">
                                 <h3 className="text-lg font-medium text-green-700">Top Performers</h3>
                                 <p className="text-sm text-green-600">
                                   Staff with high task completion rates (tasks up to today only)
@@ -1297,7 +1297,7 @@ export default function AdminDashboard() {
                                         className="flex items-center justify-between p-3 border border-green-100 rounded-md bg-green-50"
                                       >
                                         <div className="flex items-center gap-2">
-                                          <div className="h-10 w-10 rounded-full bg-gradient-to-r from-green-500 to-teal-500 flex items-center justify-center">
+                                          <div className="h-10 w-10 rounded-full bg-linear-to-r from-green-500 to-teal-500 flex items-center justify-center">
                                             <span className="text-sm font-medium text-white">
                                               {staff.name.charAt(0)}
                                             </span>
@@ -1323,7 +1323,7 @@ export default function AdminDashboard() {
 
                             {/* Mid performers section (40-69%) */}
                             <div className="rounded-md border border-yellow-200">
-                              <div className="p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 border-b border-yellow-200">
+                              <div className="p-4 bg-linear-to-r from-yellow-50 to-yellow-100 border-b border-yellow-200">
                                 <h3 className="text-lg font-medium text-yellow-700">Average Performers</h3>
                                 <p className="text-sm text-yellow-600">
                                   Staff with moderate task completion rates (tasks up to today only)
@@ -1339,7 +1339,7 @@ export default function AdminDashboard() {
                                         className="flex items-center justify-between p-3 border border-yellow-100 rounded-md bg-yellow-50"
                                       >
                                         <div className="flex items-center gap-2">
-                                          <div className="h-10 w-10 rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 flex items-center justify-center">
+                                          <div className="h-10 w-10 rounded-full bg-linear-to-r from-yellow-500 to-amber-500 flex items-center justify-center">
                                             <span className="text-sm font-medium text-white">
                                               {staff.name.charAt(0)}
                                             </span>
@@ -1366,7 +1366,7 @@ export default function AdminDashboard() {
 
                             {/* Low performers section (below 40%) */}
                             <div className="rounded-md border border-red-200">
-                              <div className="p-4 bg-gradient-to-r from-red-50 to-red-100 border-b border-red-200">
+                              <div className="p-4 bg-linear-to-r from-red-50 to-red-100 border-b border-red-200">
                                 <h3 className="text-lg font-medium text-red-700">Needs Improvement</h3>
                                 <p className="text-sm text-red-600">
                                   Staff with lower task completion rates (tasks up to today only)
@@ -1382,7 +1382,7 @@ export default function AdminDashboard() {
                                         className="flex items-center justify-between p-3 border border-red-100 rounded-md bg-red-50"
                                       >
                                         <div className="flex items-center gap-2">
-                                          <div className="h-10 w-10 rounded-full bg-gradient-to-r from-red-500 to-pink-500 flex items-center justify-center">
+                                          <div className="h-10 w-10 rounded-full bg-linear-to-r from-red-500 to-pink-500 flex items-center justify-center">
                                             <span className="text-sm font-medium text-white">
                                               {staff.name.charAt(0)}
                                             </span>
@@ -1409,7 +1409,7 @@ export default function AdminDashboard() {
                             {/* No assigned tasks section */}
                             {departmentData.staffMembers.filter((staff) => staff.totalTasks === 0).length > 0 && (
                               <div className="rounded-md border border-gray-200">
-                                <div className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                                <div className="p-4 bg-linear-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                                   <h3 className="text-lg font-medium text-gray-700">No Tasks Assigned</h3>
                                   <p className="text-sm text-gray-600">
                                     Staff with no tasks assigned for current period
@@ -1425,7 +1425,7 @@ export default function AdminDashboard() {
                                           className="flex items-center justify-between p-3 border border-gray-100 rounded-md bg-gray-50"
                                         >
                                           <div className="flex items-center gap-2">
-                                            <div className="h-10 w-10 rounded-full bg-gradient-to-r from-gray-500 to-gray-600 flex items-center justify-center">
+                                            <div className="h-10 w-10 rounded-full bg-linear-to-r from-gray-500 to-gray-600 flex items-center justify-center">
                                               <span className="text-sm font-medium text-white">
                                                 {staff.name.charAt(0)}
                                               </span>

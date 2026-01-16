@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { CheckCircle2, Upload, X, Search, History, ArrowLeft, Calendar, Check } from "lucide-react"
 import AdminLayout from "../../components/layout/AdminLayout"
 import ReactDOM from 'react-dom';
+import { getUserRole, getUsername, isAdminUser } from "../../utils/authUtils"
 
 // Google Apps Script URL
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz47q4SiLvJJom8dRGteqjhufs0Iui4rYTLMeTYqOgY_MFrS0C0o0XkRCPzAOdEeg4jqg/exec"
@@ -30,7 +31,8 @@ function AccountDataPage() {
   const [endDate, setEndDate] = useState("")
   const [selectedHistoryItems, setSelectedHistoryItems] = useState([])
   const [markingAsDone, setMarkingAsDone] = useState(false)
-  const [userRole, setUserRole] = useState("")
+  // UPDATED: Always set to 'super_admin' for unrestricted access
+  const [userRole, setUserRole] = useState("super_admin")
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     itemCount: 0
@@ -59,9 +61,13 @@ function AccountDataPage() {
   }
 
   useEffect(() => {
-    const role = sessionStorage.getItem('role')
-    setUserRole(role || '')
+    // UPDATED: Use authUtils for super_admin access
+    const role = getUserRole() // Always returns 'super_admin'
+    setUserRole(role)
   }, [])
+
+  // UPDATED: Always true for super_admin access
+  const isAdmin = true;
 
   // Parse Google Sheets Date format into a proper date string
   const parseGoogleSheetsDate = (dateStr) => {
@@ -357,7 +363,7 @@ function AccountDataPage() {
       const pendingAccounts = [];
       const historyRows = [];
 
-      const response = await fetch(`https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec/gviz/tq?tqx=out:json&sheet=STORE`);
+      const response = await fetch(`https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec/gviz/tq?tqx=out:json&sheet=STORE`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.status}`);
@@ -405,11 +411,11 @@ function AccountDataPage() {
         const assignedTo = getCellValue(row, 4) || 'Unassigned';
         membersSet.add(assignedTo); // Add to members list for dropdown
 
-        const isUserMatch = userRole === 'admin' ||
+        const isUserMatch = isAdmin ||
           assignedTo.toLowerCase() === username.toLowerCase();
 
         // If not a match and not admin, skip this row
-        if (!isUserMatch && userRole !== 'admin') return;
+        if (!isUserMatch && !isAdmin) return;
 
         // Safely get values from columns L, M, P, and Q
         const columnLValue = getCellValue(row, 11);
@@ -668,7 +674,7 @@ function AccountDataPage() {
             </div>
 
             {/* History Toggle Button */}
-            {userRole === 'admin' && (
+            {isAdmin && (
               <button
                 onClick={toggleHistory}
                 className="rounded-md bg-gradient-to-r from-blue-500 to-indigo-600 py-2 px-4 text-white hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"

@@ -21,11 +21,11 @@ const PrivateRoute = ({ children, allowedRoles }) => {
   const [userRole, setUserRole] = useState(null)
 
   useEffect(() => {
-    const userData = sessionStorage.getItem('userData')
-    if (userData) {
-      const parsedUserData = JSON.parse(userData)
+    const username = sessionStorage.getItem('username')
+    const role = sessionStorage.getItem('role')
+    if (username && role) {
       setIsAuthenticated(true)
-      setUserRole(parsedUserData.role)
+      setUserRole(role)
     }
   }, [])
 
@@ -36,7 +36,7 @@ const PrivateRoute = ({ children, allowedRoles }) => {
 
   if (!allowedRoles.includes(userRole)) {
     // Redirect to unauthorized page or dashboard based on role
-    return userRole === 'admin'
+    return (userRole === "admin" || userRole === "superadmin" || userRole === "super_admin")
       ? <Navigate to="/admin/dashboard" replace />
       : <Navigate to="/user/dashboard" replace />
   }
@@ -82,7 +82,7 @@ function App() {
         <Route
           path="/admin"
           element={
-            <PrivateRoute allowedRoles={['admin']}>
+            <PrivateRoute allowedRoles={['admin', 'superadmin', 'super_admin']}>
               <AdminLayout darkMode={darkMode} toggleDarkMode={toggleDarkMode}>
                 <Navigate to="/admin/dashboard" replace />
               </AdminLayout>
@@ -92,7 +92,7 @@ function App() {
         <Route
           path="/admin/dashboard"
           element={
-            <PrivateRoute allowedRoles={['admin']}>
+            <PrivateRoute allowedRoles={['admin', 'superadmin', 'super_admin']}>
               <AdminLayout darkMode={darkMode} toggleDarkMode={toggleDarkMode}>
                 <AdminDashboard />
               </AdminLayout>
@@ -102,7 +102,7 @@ function App() {
         <Route
           path="/admin/assign-task"
           element={
-            <PrivateRoute allowedRoles={['admin']}>
+            <PrivateRoute allowedRoles={['admin', 'superadmin', 'super_admin']}>
               <AdminLayout darkMode={darkMode} toggleDarkMode={toggleDarkMode}>
                 <AdminAssignTask />
               </AdminLayout>
@@ -122,7 +122,7 @@ function App() {
         <Route
           path="/delegation-task"
           element={
-            <PrivateRoute allowedRoles={['admin']}>
+            <PrivateRoute allowedRoles={['admin', 'superadmin', 'super_admin']}>
               <AdminLayout darkMode={darkMode} toggleDarkMode={toggleDarkMode}>
                 <AdminDelegationTask />
               </AdminLayout>
@@ -132,7 +132,7 @@ function App() {
         <Route
           path="/admin/tasks"
           element={
-            <PrivateRoute allowedRoles={['admin']}>
+            <PrivateRoute allowedRoles={['admin', 'superadmin', 'super_admin']}>
               <AdminLayout darkMode={darkMode} toggleDarkMode={toggleDarkMode}>
                 <AllTasks />
               </AdminLayout>

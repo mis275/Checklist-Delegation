@@ -1,9 +1,10 @@
 "use client"
-import { useEffect, useState, useCallback,useRef  } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { format } from 'date-fns';
-import { Search, ChevronDown, Filter } from "lucide-react";
+import { Search, ChevronDown, Filter, Trash2 } from "lucide-react";
 import AdminLayout from "../components/layout/AdminLayout";
 import DelegationPage from "./delegation-data";
+import { getUserRole, getUsername, isAdminUser, isSuperAdmin } from "../utils/authUtils";
 
 export default function QuickTask() {
   const [tasks, setTasks] = useState([]);
@@ -18,257 +19,167 @@ export default function QuickTask() {
   const [nameFilter, setNameFilter] = useState('');
   const [freqFilter, setFreqFilter] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
-  const [userRole, setUserRole] = useState(null);
+  // UPDATED: Always set to 'super_admin' for unrestricted access
+  const [userRole, setUserRole] = useState("super_admin");
+  // UPDATED: Always true for super_admin access
+  const isAdmin = true;
+  // UPDATED: Check if user is super_admin for Action column (checkbox & delete button)
+  const canAccessActionColumn = isSuperAdmin();
   const [dropdownOpen, setDropdownOpen] = useState({
     name: false,
     frequency: false
   });
   const [selectedRows, setSelectedRows] = useState(new Set());
-const [editingRows, setEditingRows] = useState(new Set());
-const [editedData, setEditedData] = useState({});
-const [submitting, setSubmitting] = useState(false);
-const dropdownRef = useRef(null);
+  const [editingRows, setEditingRows] = useState(new Set());
+  const [editedData, setEditedData] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(null); // Track which row is being deleted
+  const dropdownRef = useRef(null);
 
 
-useEffect(() => {
-  const handleClickOutside = (event) => {
-    if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-      setDropdownOpen({ name: false, frequency: false });
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setDropdownOpen({ name: false, frequency: false });
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Dropdown toggle functions
+
+
+
+  const formatTimestampForSheet = () => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  };
+
+
+
+  const generateTaskId = () => {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `TASK${timestamp}${random}`;
+  };
+
+  const handleRowSelection = (taskId) => {
+    const newSelected = new Set(selectedRows);
+    const newEditing = new Set(editingRows);
+
+    if (newSelected.has(taskId)) {
+      newSelected.delete(taskId);
+      newEditing.delete(taskId);
+      // Remove from edited data
+      setEditedData(prev => {
+        const newData = { ...prev };
+        delete newData[taskId];
+        return newData;
+      });
+    } else {
+      newSelected.add(taskId);
+      newEditing.add(taskId);
+      // Initialize edited data with current task data
+      const task = filteredChecklistTasks.find(t => t._id === taskId);
+      setEditedData(prev => ({ ...prev, [taskId]: { ...task } }));
+    }
+
+    setSelectedRows(newSelected);
+    setEditingRows(newEditing);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedRows.size === filteredChecklistTasks.length) {
+      // Deselect all
+      setSelectedRows(new Set());
+      setEditingRows(new Set());
+      setEditedData({});
+    } else {
+      // Select all
+      const allIds = new Set(filteredChecklistTasks.map(task => task._id));
+      setSelectedRows(allIds);
+      setEditingRows(allIds);
+      // Initialize edited data for all tasks
+      const newEditedData = {};
+      filteredChecklistTasks.forEach(task => {
+        newEditedData[task._id] = { ...task };
+      });
+      setEditedData(newEditedData);
     }
   };
 
-  document.addEventListener('mousedown', handleClickOutside);
-  return () => {
-    document.removeEventListener('mousedown', handleClickOutside);
+  const handleInputChange = (taskId, field, value) => {
+    setEditedData(prev => ({
+      ...prev,
+      [taskId]: { ...prev[taskId], [field]: value }
+    }));
   };
-}, []);
 
-// Dropdown toggle functions
+  const formatDateForSheet = (dateString) => {
+    if (!dateString) return '';
 
+    // If already in sheet format "12/11/2025 21:00:00", return exactly as-is
+    if (typeof dateString === 'string' && dateString.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/)) {
+      return dateString;
+    }
 
+    // Handle Google Sheets Date format: Date(2025,11,12,9,0,0)
+    if (typeof dateString === 'string' && dateString.startsWith('Date(')) {
+      try {
+        const match = dateString.match(/Date\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
+        if (match) {
+          const year = parseInt(match[1], 10);
+          const month = parseInt(match[2], 10); // 0-based (0=Jan, 11=Dec)
+          const day = parseInt(match[3], 10);
+          const hour = parseInt(match[4], 10);
+          const minute = parseInt(match[5], 10);
+          const second = parseInt(match[6], 10);
 
-const formatTimestampForSheet = () => {
-  const now = new Date();
-  const day = String(now.getDate()).padStart(2, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const year = now.getFullYear();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-};
+          // Format to DD/MM/YYYY HH:MM:SS
+          const formattedDay = String(day).padStart(2, '0');
+          const formattedMonth = String(month + 1).padStart(2, '0'); // Convert to 1-based
+          const formattedYear = year;
+          const formattedHour = String(hour).padStart(2, '0');
+          const formattedMinute = String(minute).padStart(2, '0');
+          const formattedSecond = String(second).padStart(2, '0');
 
+          return `${formattedDay}/${formattedMonth}/${formattedYear} ${formattedHour}:${formattedMinute}:${formattedSecond}`;
+        }
+      } catch (e) {
+        // Continue to other parsing methods
+      }
+    }
 
-
-const generateTaskId = () => {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 8);
-  return `TASK${timestamp}${random}`;
-};
-
-const handleRowSelection = (taskId) => {
-  const newSelected = new Set(selectedRows);
-  const newEditing = new Set(editingRows);
-
-  if (newSelected.has(taskId)) {
-    newSelected.delete(taskId);
-    newEditing.delete(taskId);
-    // Remove from edited data
-    setEditedData(prev => {
-      const newData = { ...prev };
-      delete newData[taskId];
-      return newData;
-    });
-  } else {
-    newSelected.add(taskId);
-    newEditing.add(taskId);
-    // Initialize edited data with current task data
-    const task = filteredChecklistTasks.find(t => t._id === taskId);
-    setEditedData(prev => ({ ...prev, [taskId]: { ...task } }));
-  }
-
-  setSelectedRows(newSelected);
-  setEditingRows(newEditing);
-};
-
-const handleSelectAll = () => {
-  if (selectedRows.size === filteredChecklistTasks.length) {
-    // Deselect all
-    setSelectedRows(new Set());
-    setEditingRows(new Set());
-    setEditedData({});
-  } else {
-    // Select all
-    const allIds = new Set(filteredChecklistTasks.map(task => task._id));
-    setSelectedRows(allIds);
-    setEditingRows(allIds);
-    // Initialize edited data for all tasks
-    const newEditedData = {};
-    filteredChecklistTasks.forEach(task => {
-      newEditedData[task._id] = { ...task };
-    });
-    setEditedData(newEditedData);
-  }
-};
-
-const handleInputChange = (taskId, field, value) => {
-  setEditedData(prev => ({
-    ...prev,
-    [taskId]: { ...prev[taskId], [field]: value }
-  }));
-};
-
-const formatDateForSheet = (dateString) => {
-  if (!dateString) return '';
-  
-  // If already in sheet format "12/11/2025 21:00:00", return exactly as-is
-  if (typeof dateString === 'string' && dateString.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/)) {
-    return dateString;
-  }
-  
-  // Handle Google Sheets Date format: Date(2025,11,12,9,0,0)
-  if (typeof dateString === 'string' && dateString.startsWith('Date(')) {
+    // Handle Date object or ISO string
     try {
-      const match = dateString.match(/Date\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
-      if (match) {
-        const year = parseInt(match[1], 10);
-        const month = parseInt(match[2], 10); // 0-based (0=Jan, 11=Dec)
-        const day = parseInt(match[3], 10);
-        const hour = parseInt(match[4], 10);
-        const minute = parseInt(match[5], 10);
-        const second = parseInt(match[6], 10);
-        
-        // Format to DD/MM/YYYY HH:MM:SS
-        const formattedDay = String(day).padStart(2, '0');
-        const formattedMonth = String(month + 1).padStart(2, '0'); // Convert to 1-based
-        const formattedYear = year;
-        const formattedHour = String(hour).padStart(2, '0');
-        const formattedMinute = String(minute).padStart(2, '0');
-        const formattedSecond = String(second).padStart(2, '0');
-        
-        return `${formattedDay}/${formattedMonth}/${formattedYear} ${formattedHour}:${formattedMinute}:${formattedSecond}`;
+      const date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
       }
     } catch (e) {
-      // Continue to other parsing methods
-    }
-  }
-  
-  // Handle Date object or ISO string
-  try {
-    const date = new Date(dateString);
-    if (!isNaN(date.getTime())) {
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const year = date.getFullYear();
-      const hours = String(date.getHours()).padStart(2, '0');
-      const minutes = String(date.getMinutes()).padStart(2, '0');
-      const seconds = String(date.getSeconds()).padStart(2, '0');
-      return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-    }
-  } catch (e) {
-    // Return original value if can't parse
-  }
-  
-  return dateString; // Return whatever was in the input field
-};
-
-
-
-
-const submitSelectedTasks = async () => {
-  try {
-    setSubmitting(true);
-    
-    const userAppScriptUrl = "https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec";
-    const userSheetId = CONFIG.SHEET_ID;
-    
-    if (!userAppScriptUrl || !userSheetId) {
-      throw new Error('User configuration missing. Please log in again.');
+      // Return original value if can't parse
     }
 
-    // Fetch last Task ID
-    const sheetUrl = `https://docs.google.com/spreadsheets/d/${userSheetId}/gviz/tq?tqx=out:json&sheet=${CONFIG.CHECKLIST_SHEET}`;
-    const sheetResponse = await fetch(sheetUrl);
-    const sheetText = await sheetResponse.text();
-    const jsonStart = sheetText.indexOf('{');
-    const jsonEnd = sheetText.lastIndexOf('}') + 1;
-    const jsonData = sheetText.substring(jsonStart, jsonEnd);
-    const sheetData = JSON.parse(jsonData);
+    return dateString; // Return whatever was in the input field
+  };
 
-    let lastTaskId = 0;
-    if (sheetData?.table?.rows) {
-      for (let i = 1; i < sheetData.table.rows.length; i++) {
-        const taskIdValue = sheetData.table.rows[i].c[1]?.v;
-        if (taskIdValue) {
-          const taskIdNum = parseInt(taskIdValue);
-          if (!isNaN(taskIdNum)) lastTaskId = Math.max(lastTaskId, taskIdNum);
-        }
-      }
-    }
-
-    // Generate tasks with sequential Task IDs
-    const tasksToSubmit = Array.from(selectedRows).map((taskId, index) => {
-      const editedTask = editedData[taskId];
-      const newTaskId = lastTaskId + index + 1;
-      const currentTimestamp = formatTimestampForSheet();
-      
-      // Log the original and formatted date for debugging
-      console.log("Date processing:", {
-        original: editedTask['End Date'],
-        formatted: formatDateForSheet(editedTask['End Date'])
-      });
-      
-      return {
-        timestamp: currentTimestamp,
-        taskId: String(newTaskId),
-        department: editedTask.Department || "",
-        givenBy: editedTask['Given By'] || "",
-        name: editedTask.Name || "",
-        description: editedTask['Task Description'] || "",
-        startDate: formatDateForSheet(editedTask['End Date']), // Use the improved function
-        freq: editedTask.Frequency || "",
-        enableReminders: editedTask.Reminders || "",
-        requireAttachment: editedTask.Attachment || ""
-      };
-    });
-
-    console.log("Final tasks to submit:", tasksToSubmit);
-
-    const submitUrl = `${userAppScriptUrl}?sheetName=${CONFIG.CHECKLIST_SHEET}&action=insert&batchInsert=true`;
-    const response = await fetch(submitUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        rowData: JSON.stringify(tasksToSubmit),
-        sheetName: CONFIG.CHECKLIST_SHEET,
-        action: 'insert',
-        batchInsert: 'true'
-      })
-    });
-
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const result = await response.json();
-
-    if (!result.success) throw new Error(result.error || 'Server returned error');
-
-    setSelectedRows(new Set());
-    setEditingRows(new Set());
-    setEditedData({});
-    await fetchChecklistData();
-    alert(`Successfully submitted ${tasksToSubmit.length} tasks!`);
-  } catch (error) {
-    console.error('Submission error:', error);
-    alert(`Error: ${error.message}`);
-  } finally {
-    setSubmitting(false);
-  }
-};
-
-
-
-
-
-
+  // CONFIG must be defined before functions that use it
   const CONFIG = {
     SHEET_ID: "1T6F0MMLbJALv79ka8hdr-Oo_Jtjn9oXT7PLMdq_jGB8",
     WHATSAPP_SHEET: "master", // For login credentials and user roles
@@ -277,6 +188,211 @@ const submitSelectedTasks = async () => {
     PAGE_CONFIG: {
       title: "Task Management",
       description: "Showing your tasks"
+    }
+  };
+
+
+
+
+  const submitSelectedTasks = async () => {
+    // Prevent double submission
+    if (submitting) {
+      console.log("Already submitting, ignoring duplicate call");
+      return;
+    }
+
+    // Validate we have tasks to submit
+    if (selectedRows.size === 0) {
+      alert('No tasks selected');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const userAppScriptUrl = "https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec";
+
+      // Log selected rows to check for duplicates
+      console.log("=== SELECTED ROWS ===");
+      console.log("Selected row IDs:", Array.from(selectedRows));
+      console.log("Number of selected:", selectedRows.size);
+
+      // Build tasks to update using EXISTING Task IDs and row indices
+      const tasksToUpdate = Array.from(selectedRows).map((taskInternalId) => {
+        const editedTask = editedData[taskInternalId];
+        // Use 'tasks' array (original unfiltered) to find the original task with _rowIndex
+        const originalTask = tasks.find(t => t._id === taskInternalId);
+
+        if (!originalTask) {
+          console.error(`Original task not found for ID: ${taskInternalId}`);
+          return null;
+        }
+
+        // Use the EXISTING Task ID and rowIndex from the original task
+        const existingTaskId = originalTask['Task ID'];
+        const rowIndex = originalTask._rowIndex;
+
+        // Validate rowIndex
+        if (!rowIndex || rowIndex < 2) {
+          console.error(`Invalid rowIndex (${rowIndex}) for task ID: ${existingTaskId}`);
+          return null;
+        }
+
+        // Log for debugging
+        console.log("=== Task Update Debug ===");
+        console.log("Internal ID:", taskInternalId);
+        console.log("Existing Task ID:", existingTaskId);
+        console.log("Row Index (sheet row):", rowIndex);
+        console.log("Original Task:", originalTask);
+        console.log("Edited Task:", editedTask);
+
+        // Build row data array for ALL columns (A through J)
+        // Backend expects: rowData[0] = Column A, rowData[1] = Column B, etc.
+        // Empty strings are skipped by the backend
+        const rowData = [
+          "", // Column A (index 0) - Timestamp - keep original, don't update
+          String(existingTaskId), // Column B (index 1) - Task ID - keep same
+          editedTask?.Department || originalTask?.Department || "", // Column C (index 2)
+          editedTask?.['Given By'] || originalTask?.['Given By'] || "", // Column D (index 3)
+          editedTask?.Name || originalTask?.Name || "", // Column E (index 4)
+          editedTask?.['Task Description'] || originalTask?.['Task Description'] || "", // Column F (index 5)
+          formatDateForSheet(editedTask?.['End Date'] || originalTask?.['End Date']), // Column G (index 6)
+          editedTask?.Frequency || originalTask?.Frequency || "", // Column H (index 7)
+          editedTask?.Reminders || originalTask?.Reminders || "", // Column I (index 8)
+          editedTask?.Attachment || originalTask?.Attachment || "" // Column J (index 9)
+        ];
+
+        console.log("Row Data to send:", rowData);
+
+        return {
+          rowIndex: rowIndex,
+          taskId: String(existingTaskId),
+          rowData: rowData
+        };
+      }).filter(Boolean); // Remove null entries
+
+      if (tasksToUpdate.length === 0) {
+        throw new Error('No valid tasks to update. Check console for errors.');
+      }
+
+      // console.log("=== Final Tasks to Update ===");
+      // console.log(JSON.stringify(tasksToUpdate, null, 2));
+
+      // Update each task using the 'update' action (matches backend doPost)
+      let successCount = 0;
+      for (const task of tasksToUpdate) {
+        // Build the request body
+        const requestBody = {
+          sheetName: CONFIG.CHECKLIST_SHEET,
+          action: 'updateQuickTask',
+          taskId: task.taskId,
+          rowData: JSON.stringify(task.rowData)
+        };
+
+        // console.log("=== REQUEST DETAILS ===");
+        // console.log("URL:", userAppScriptUrl);
+        // console.log("Sheet:", requestBody.sheetName);
+        // console.log("Action:", requestBody.action);
+        // console.log("Task ID:", requestBody.taskId);
+        // console.log("Row Data:", requestBody.rowData);
+
+        // Use URLSearchParams as the backend expects form data
+        const response = await fetch(userAppScriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(requestBody)
+        });
+
+        if (!response.ok) {
+          console.error(`Failed to update task ${task.taskId}: HTTP ${response.status}`);
+          continue;
+        }
+
+        const result = await response.json();
+        console.log(`=== FULL BACKEND RESPONSE for Task ID ${task.taskId} ===`);
+        console.log(JSON.stringify(result, null, 2));
+
+        if (result.success) {
+          successCount++;
+        } else {
+          console.error(`Failed to update task ${task.taskId}:`, result.error || result.message);
+        }
+      }
+
+      setSelectedRows(new Set());
+      setEditingRows(new Set());
+      setEditedData({});
+      await fetchChecklistData();
+
+      if (successCount === tasksToUpdate.length) {
+        alert(`Successfully updated ${successCount} task(s)!`);
+      } else if (successCount > 0) {
+        alert(`Updated ${successCount} of ${tasksToUpdate.length} task(s). Some updates may have failed.`);
+      } else {
+        throw new Error('No tasks were updated. Please check the console for errors.');
+      }
+    } catch (error) {
+      console.error('Submission error:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+
+
+  // Delete task function for super_admin
+  const handleDeleteTask = async (task) => {
+    if (!confirm(`Are you sure you want to delete this task?\n\nTask ID: ${task['Task ID'] || 'N/A'}\nName: ${task.Name || 'N/A'}\nDescription: ${task['Task Description'] || 'N/A'}`)) {
+      return;
+    }
+
+    try {
+      setDeleting(task._id);
+
+      const userAppScriptUrl = "https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec";
+      const sheetName = CONFIG.CHECKLIST_SHEET;
+
+      // Use rowIndex to identify the row to delete (matches backend handleDeleteRow)
+      const rowIndex = task._rowIndex;
+      const taskId = task['Task ID'];
+
+      if (!rowIndex) {
+        throw new Error('Row index not found. Cannot delete this row.');
+      }
+
+      console.log("Deleting task:", {
+        taskId: taskId,
+        rowIndex: rowIndex,
+        sheetName: sheetName
+      });
+
+      // Backend expects: action='deleteRow', sheet (not sheetName), rowIndex
+      const response = await fetch(userAppScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          action: 'deleteRow',
+          sheet: sheetName, // Backend uses 'sheet' not 'sheetName'
+          rowIndex: String(rowIndex)
+        })
+      });
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const result = await response.json();
+
+      console.log("Delete result:", result);
+
+      if (!result.success) throw new Error(result.error || 'Server returned error');
+
+      // Refresh the data
+      await fetchChecklistData();
+      alert(`Task "${taskId}" deleted successfully!`);
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert(`Error deleting task: ${error.message}`);
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -297,6 +413,10 @@ const submitSelectedTasks = async () => {
       }
 
       // Fetch user role from Whatsapp sheet
+      console.log("🔹 Fetching data from 'whatsapp' (master) sheet...");
+      console.log("🔹 Current Session Username:", loggedInUsername);
+      console.log("WHATSAPP_SHEET:", CONFIG.WHATSAPP_SHEET);
+
       const whatsappSheetUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${CONFIG.WHATSAPP_SHEET}`;
       const response = await fetch(whatsappSheetUrl);
       const text = await response.text();
@@ -306,39 +426,44 @@ const submitSelectedTasks = async () => {
       const jsonData = text.substring(jsonStart, jsonEnd);
       const data = JSON.parse(jsonData);
 
-      console.log("data:", data);
+      console.log("✅ RAW SHEET DATA from 'whatsapp':", data);
 
       if (data?.table?.rows) {
         let foundUser = null;
 
-        // Skip header row and search for user
-        data.table.rows.slice(1).forEach((row) => {
-          if (row.c) {
-            const doerName = row.c[3]?.v || ""; // Column C - Doer's Name
-            const role = row.c[5]?.v || "user"; // Column E - Role
+        console.log("🔎 Starting user match search...");
 
-            console.log(doerName)
-            console.log(loggedInUsername)
+        // Skip header row and search for user
+        data.table.rows.slice(1).forEach((row, index) => {
+          if (row.c) {
+            const doerName = row.c[3]?.v || ""; // Column D - Doer's Name
+            const role = row.c[5]?.v || "user"; // Column F - Role
+
+            // Only log if names exist to avoid clutter
+            if (doerName) {
+              // console.log(`   [Row ${index + 2}] Checking: '${doerName}' (Role: ${role}) vs Session: '${loggedInUsername}'`);
+            }
 
             // Match by username (case-insensitive)
             if (doerName.toLowerCase().trim() === loggedInUsername.toLowerCase().trim()) {
+              console.log("🎯 MATCH FOUND!");
               foundUser = {
                 name: doerName,
                 role: role.toLowerCase().trim(),
                 department: row.c[0]?.v || "", // Column A - Department
                 givenBy: row.c[1]?.v || "", // Column B - Given By
-                email: row.c[6]?.v || "" // Column F - ID/Email
+                email: row.c[6]?.v || "" // Column G - ID/Email
               };
+              console.log("👤 User Details:", foundUser);
             }
           }
         });
 
-
         if (foundUser) {
           setCurrentUser(foundUser.name);
           setUserRole(foundUser.role);
-          // console.log("User found in Whatsapp sheet:", foundUser);
         } else {
+          console.error("❌ User NOT found in sheet.");
           throw new Error(`User "${loggedInUsername}" not found in Whatsapp sheet. Please contact administrator.`);
         }
       } else {
@@ -352,89 +477,79 @@ const submitSelectedTasks = async () => {
       setUserLoading(false);
     }
   }, []);
-// **COMPLETE CORRECTED fetchChecklistData function** - Replace your entire fetchChecklistData function:
+  // **COMPLETE CORRECTED fetchChecklistData function** - Replace your entire fetchChecklistData function:
 
-const fetchChecklistData = useCallback(async () => {
-  if (!currentUser || userLoading) return;
+  const fetchChecklistData = useCallback(async () => {
+    if (!currentUser || userLoading) return;
 
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    // Fetch from Checklist sheet (Unique sheet)
-    const checklistUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${CONFIG.CHECKLIST_SHEET}`;
-    const response = await fetch(checklistUrl);
-    const text = await response.text();
+      // Fetch from Checklist sheet (Unique sheet)
+      const checklistUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${CONFIG.CHECKLIST_SHEET}`;
+      const response = await fetch(checklistUrl);
+      const text = await response.text();
 
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}') + 1;
-    const jsonData = text.substring(jsonStart, jsonEnd);
-    const data = JSON.parse(jsonData);
+      const jsonStart = text.indexOf('{');
+      const jsonEnd = text.lastIndexOf('}') + 1;
+      const jsonData = text.substring(jsonStart, jsonEnd);
+      const data = JSON.parse(jsonData);
 
-    if (data?.table?.rows) {
-      const rows = data.table.rows.slice(1); // Skip header
+      if (data?.table?.rows) {
+        const rows = data.table.rows.slice(1); // Skip header
 
-      // Map columns according to your specification (B-J from Checklist sheet)
-      const transformedData = rows.map((row, rowIndex) => {
-        // Handle End Date field - convert from Google Sheets format if needed
-        let startDateValue = row.c[6]?.v || "";
-        if (typeof startDateValue === 'string' && startDateValue.startsWith('Date(')) {
-          startDateValue = formatDateForSheet(startDateValue);
-        }
-        
-        const baseData = {
-          _id: `checklist_${rowIndex}_${Math.random().toString(36).substring(2, 15)}`,
-          _rowIndex: rowIndex + 2,
-          'Task ID': row.c[1]?.v || "",
-          Department: row.c[2]?.v || "",
-          'Given By': row.c[3]?.v || "",
-          Name: row.c[4]?.v || "",
-          'Task Description': row.c[5]?.v || "",
-          'End Date': startDateValue, // Use processed date
-          Frequency: row.c[7]?.v || "",
-          Reminders: row.c[8]?.v || "",
-          Attachment: row.c[9]?.v || "",
-          Task: 'Checklist'
-        };
-        return baseData;
-      }).filter(item => {
-        // Filter out rows where both Name and Task Description are empty
-        return item.Name && item['Task Description'];
-      });
+        // Map columns according to your specification (B-J from Checklist sheet)
+        const transformedData = rows.map((row, rowIndex) => {
+          // Handle End Date field - convert from Google Sheets format if needed
+          let startDateValue = row.c[6]?.v || "";
+          if (typeof startDateValue === 'string' && startDateValue.startsWith('Date(')) {
+            startDateValue = formatDateForSheet(startDateValue);
+          }
 
-      // Create unique tasks based on Name + Task Description combination
-      const uniqueTasksMap = new Map();
-      transformedData.forEach(task => {
-        const key = `${task.Name?.toLowerCase().trim()}_${task['Task Description']?.toLowerCase().trim()}`;
-        if (!uniqueTasksMap.has(key)) {
-          uniqueTasksMap.set(key, task);
-        }
-      });
-
-      const uniqueTasks = Array.from(uniqueTasksMap.values());
-
-      // Apply role-based filtering
-      let filteredData;
-      if (userRole === 'admin') {
-        filteredData = uniqueTasks;
-      } else {
-        filteredData = uniqueTasks.filter(item => {
-          const itemName = (item.Name || '').toString().toLowerCase().trim();
-          const currentUserLower = currentUser.toLowerCase().trim();
-          return itemName === currentUserLower;
+          const baseData = {
+            _id: `checklist_${rowIndex}_${Math.random().toString(36).substring(2, 15)}`,
+            _rowIndex: rowIndex + 2,
+            'Task ID': row.c[1]?.v || "",
+            Department: row.c[2]?.v || "",
+            'Given By': row.c[3]?.v || "",
+            Name: row.c[4]?.v || "",
+            'Task Description': row.c[5]?.v || "",
+            'End Date': startDateValue, // Use processed date
+            Frequency: row.c[7]?.v || "",
+            Reminders: row.c[8]?.v || "",
+            Attachment: row.c[9]?.v || "",
+            Task: 'Checklist'
+          };
+          return baseData;
         });
-      }
 
-      setTasks(filteredData);
-    } else {
-      throw new Error("Invalid checklist data format");
+        // Use all transformed data directly
+        const uniqueTasks = transformedData;
+
+        // Apply role-based filtering
+        let filteredData;
+        if (isAdmin) {
+          filteredData = uniqueTasks;
+        } else {
+          filteredData = uniqueTasks.filter(item => {
+            const itemName = (item.Name || '').toString().toLowerCase().trim();
+            const currentUserLower = currentUser.toLowerCase().trim();
+            return itemName === currentUserLower;
+          });
+        }
+        console.log(filteredData, 'filterdata')
+
+        setTasks(filteredData);
+      } else {
+        throw new Error("Invalid checklist data format");
+      }
+    } catch (err) {
+      console.error("Checklist fetch error:", err);
+      setError(err.message || "Failed to load checklist data");
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error("Checklist fetch error:", err);
-    setError(err.message || "Failed to load checklist data");
-  } finally {
-    setLoading(false);
-  }
-}, [currentUser, userRole, userLoading]);
+  }, [currentUser, userRole, userLoading]);
 
   const fetchDelegationData = useCallback(async () => {
     if (!currentUser || userLoading) return;
@@ -473,14 +588,14 @@ const fetchChecklistData = useCallback(async () => {
           return baseData;
         });
 
-        // console.log(`Total delegation tasks:`, transformedData.length);
+        console.log(`Total delegation tasks:`, transformedData.length);
 
         // Apply role-based filtering (unchanged from original)
         let filteredData;
-        if (userRole === 'admin') {
-          // Admin sees all tasks
+        if (isAdmin) {
+          // Admin/Superadmin sees all tasks
           filteredData = transformedData;
-          // console.log("Admin access: showing all delegation tasks");
+          console.log("Admin/Superadmin access: showing all delegation tasks");
         } else {
           // Regular user sees only their tasks
           filteredData = transformedData.filter(item => {
@@ -513,10 +628,10 @@ const fetchChecklistData = useCallback(async () => {
     try {
       // already "dd/MM/yyyy HH:mm:ss"
       if (typeof dateValue === "string" &&
-          dateValue.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/)) {
+        dateValue.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/)) {
         return dateValue;
       }
-  
+
       // Google Sheets gviz: Date(2025,10,12,21,0,0)
       if (typeof dateValue === "string" && dateValue.startsWith("Date(")) {
         const match = dateValue.match(/Date\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
@@ -537,7 +652,7 @@ const fetchChecklistData = useCallback(async () => {
           return `${dd}/${mm}/${yyyy} ${hh}:${mi}:${ss}`;
         }
       }
-  
+
       // fallback
       const d = new Date(dateValue);
       if (!isNaN(d.getTime())) {
@@ -549,13 +664,13 @@ const fetchChecklistData = useCallback(async () => {
         const ss = String(d.getSeconds()).padStart(2, "0");
         return `${dd}/${mm}/${yyyy} ${hh}:${mi}:${ss}`;
       }
-  
+
       return dateValue;
     } catch {
       return dateValue;
     }
   };
-  
+
 
   const requestSort = (key) => {
     if (loading) return;
@@ -734,553 +849,572 @@ const fetchChecklistData = useCallback(async () => {
             </div>
 
             <div className="flex gap-2" ref={dropdownRef}>
-  {/* Name Filter Dropdown */}
-  <div className="relative">
-    <button
-      onClick={() => toggleDropdown('name')}
-      className="flex items-center gap-2 px-3 py-2 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-    >
-      <Filter className="h-4 w-4" />
-      {nameFilter || 'Filter by Name'}
-      <ChevronDown size={16} className={`transition-transform ${dropdownOpen.name ? 'rotate-180' : ''}`} />
-    </button>
-    {dropdownOpen.name && (
-      <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
-        <div className="py-1">
-          <button
-            onClick={clearNameFilter}
-            className={`block w-full text-left px-4 py-2 text-sm ${!nameFilter ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
-          >
-            All Names
-          </button>
-          {currentNames.map(name => (
-            <button
-              key={name}
-              onClick={() => handleNameFilterSelect(name)}
-              className={`block w-full text-left px-4 py-2 text-sm ${nameFilter === name ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      </div>
-    )}
-  </div>
+              {/* Name Filter Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => toggleDropdown('name')}
+                  className="flex items-center gap-2 px-3 py-2 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <Filter className="h-4 w-4" />
+                  {nameFilter || 'Filter by Name'}
+                  <ChevronDown size={16} className={`transition-transform ${dropdownOpen.name ? 'rotate-180' : ''}`} />
+                </button>
+                {dropdownOpen.name && (
+                  <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
+                    <div className="py-1">
+                      <button
+                        onClick={clearNameFilter}
+                        className={`block w-full text-left px-4 py-2 text-sm ${!nameFilter ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
+                      >
+                        All Names
+                      </button>
+                      {currentNames.map(name => (
+                        <button
+                          key={name}
+                          onClick={() => handleNameFilterSelect(name)}
+                          className={`block w-full text-left px-4 py-2 text-sm ${nameFilter === name ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
-  {/* Frequency Filter Dropdown */}
-  <div className="relative">
-    <button
-      onClick={() => toggleDropdown('frequency')}
-      className="flex items-center gap-2 px-3 py-2 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-    >
-      <Filter className="h-4 w-4" />
-      {freqFilter || 'Filter by Frequency'}
-      <ChevronDown size={16} className={`transition-transform ${dropdownOpen.frequency ? 'rotate-180' : ''}`} />
-    </button>
-    {dropdownOpen.frequency && (
-      <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
-        <div className="py-1">
-          <button
-            onClick={clearFrequencyFilter}
-            className={`block w-full text-left px-4 py-2 text-sm ${!freqFilter ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
-          >
-            All Frequencies
-          </button>
-          {currentFrequencies.map(freq => (
-            <button
-              key={freq}
-              onClick={() => handleFrequencyFilterSelect(freq)}
-              className={`block w-full text-left px-4 py-2 text-sm ${freqFilter === freq ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
-            >
-              {freq}
-            </button>
-          ))}
-        </div>
-      </div>
-    )}
-  </div>
-</div>
+              {/* Frequency Filter Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => toggleDropdown('frequency')}
+                  className="flex items-center gap-2 px-3 py-2 border border-purple-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <Filter className="h-4 w-4" />
+                  {freqFilter || 'Filter by Frequency'}
+                  <ChevronDown size={16} className={`transition-transform ${dropdownOpen.frequency ? 'rotate-180' : ''}`} />
+                </button>
+                {dropdownOpen.frequency && (
+                  <div className="absolute z-50 mt-1 w-56 rounded-md bg-white shadow-lg border border-gray-200 max-h-60 overflow-auto">
+                    <div className="py-1">
+                      <button
+                        onClick={clearFrequencyFilter}
+                        className={`block w-full text-left px-4 py-2 text-sm ${!freqFilter ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
+                      >
+                        All Frequencies
+                      </button>
+                      {currentFrequencies.map(freq => (
+                        <button
+                          key={freq}
+                          onClick={() => handleFrequencyFilterSelect(freq)}
+                          className={`block w-full text-left px-4 py-2 text-sm ${freqFilter === freq ? 'bg-purple-100 text-purple-900' : 'text-gray-700 hover:bg-gray-100'}`}
+                        >
+                          {freq}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {currentUser && (
         <>
-         {activeTab === 'checklist' ? (
-  <div className="mt-4 rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
-    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
-      <h2 className="text-purple-700 font-medium">
-        {userRole === 'admin' ? 'All Unique Tasks' : 'My Unique Tasks'}
-      </h2>
-      <p className="text-purple-600 text-sm">
-        {userRole === 'admin' ? 'Showing all unique tasks from checklist' : CONFIG.PAGE_CONFIG.description}
-      </p>
-    </div>
-
-    {/* Submit Button */}
-    {selectedRows.size > 0 && (
-      <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b">
-        <button
-          onClick={submitSelectedTasks}
-          disabled={submitting}
-          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium flex items-center gap-2"
-        >
-          {submitting ? (
-            <>
-              <div className="inline-block animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-              Submitting...
-            </>
-          ) : (
-            `Submit ${selectedRows.size} Selected Task${selectedRows.size === 1 ? '' : 's'}`
-          )}
-        </button>
-      </div>
-    )}
-
-    <div className="hidden sm:block overflow-x-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50 sticky top-0 z-20">
-          <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
-                  onChange={handleSelectAll}
-                  className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                />
-                <span className="ml-2">Action</span>
+          {activeTab === 'checklist' ? (
+            <div className="mt-4 rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
+                <h2 className="text-purple-700 font-medium">
+                  {isAdmin ? 'All Unique Tasks' : 'My Unique Tasks'}
+                </h2>
+                <p className="text-purple-600 text-sm">
+                  {isAdmin ? 'Showing all unique tasks from checklist' : CONFIG.PAGE_CONFIG.description}
+                </p>
               </div>
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50">
-      Task ID
-    </th>
-            {[
-              { key: 'Department', label: 'Department' },
-              { key: 'Given By', label: 'Given By' },
-              { key: 'Name', label: 'Name' },
-              { key: 'Task Description', label: 'Task Description', minWidth: 'min-w-[300px]' },
-              { key: 'End Date', label: 'End Date', bg: 'bg-yellow-50' },
-              { key: 'Frequency', label: 'Frequency' },
-              { key: 'Reminders', label: 'Reminders' },
-              { key: 'Attachment', label: 'Attachment' },
-            ].map((column) => (
-              <th
-                key={column.label}
-                className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${column.bg || ''} ${column.minWidth || ''} ${column.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
-                onClick={() => column.key && requestSort(column.key)}
-              >
-                <div className="flex items-center">
-                  {column.label}
-                  {sortConfig.key === column.key && (
-                    <span className="ml-1">
-                      {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                    </span>
-                  )}
-                </div>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
-          {loading ? (
-            <tr>
-              <td colSpan={9} className="px-6 py-8 text-center">
-                <div className="flex flex-col items-center justify-center">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-                  <p className="text-purple-600">Loading Unique task...</p>
-                </div>
-              </td>
-            </tr>
-          ) : filteredChecklistTasks.length > 0 ? (
-            filteredChecklistTasks.map((task) => {
-              const isEditing = editingRows.has(task._id);
-              const editedTask = editedData[task._id] || task;
-              const isSelected = selectedRows.has(task._id);
-              
-              return (
-                <tr key={task._id} className={`hover:bg-gray-50 ${isEditing ? 'bg-blue-50' : ''}`}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => handleRowSelection(task._id)}
-                      className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                    />
-                  </td>
-                     {/* NEW Task ID column */}
-         {/* Task ID column - display from sheet */}
-<td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-green-50">
-  {task['Task ID'] || 'N/A'}
-</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Department || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      task.Department || "—"
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask['Given By'] || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      task['Given By'] || "—"
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Name || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      task.Name || "—"
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500 min-w-[300px] max-w-[400px]">
-                    {isEditing ? (
-                      <textarea
-                        value={editedTask['Task Description'] || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                        rows={2}
-                      />
-                    ) : (
-                      <div className="whitespace-normal break-words">
-                        {task['Task Description'] || "—"}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 bg-yellow-50">
-  {isEditing ? (
-    <div className="flex gap-2 items-center">
-      <input
-        type="date"
-        value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
-        onChange={(e) => {
-          if (e.target.value) {
-            const [year, month, day] = e.target.value.split('-');
-            handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
-          } else {
-            handleInputChange(task._id, 'End Date', '');
-          }
-        }}
-        className="px-2 py-1 border border-gray-300 rounded text-sm"
-      />
-      <input
-        type="time"
-        value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[1] || '00:00' : '00:00'}
-        onChange={(e) => {
-          const dateStr = editedTask['End Date']?.split(' ')[0] || '';
-          if (dateStr) {
-            const [hours, minutes] = e.target.value.split(':');
-            handleInputChange(task._id, 'End Date', `${dateStr} ${hours}:${minutes}:00`);
-          }
-        }}
-        className="px-2 py-1 border border-gray-300 rounded text-sm"
-      />
-    </div>
-  ) : (
-    formatDate(task['End Date']) || "—"
-  )}
-</td>
 
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {isEditing ? (
-                      <select
-                        value={editedTask.Frequency || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                      >
-                        <option value="">Select Frequency</option>
-                        <option value="Daily">Daily</option>
-                        <option value="Weekly">Weekly</option>
-                        <option value="Monthly">Monthly</option>
-                      </select>
+              {/* Submit Button */}
+              {selectedRows.size > 0 && (
+                <div className="mb-4 flex justify-end p-4 bg-blue-50 border-b">
+                  <button
+                    onClick={submitSelectedTasks}
+                    disabled={submitting}
+                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium flex items-center gap-2"
+                  >
+                    {submitting ? (
+                      <>
+                        <div className="inline-block animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                        Submitting...
+                      </>
                     ) : (
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' :
-                        task.Frequency === 'Weekly' ? 'bg-green-100 text-green-800' :
-                        task.Frequency === 'Monthly' ? 'bg-purple-100 text-purple-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {task.Frequency || "—"}
-                      </span>
+                      `Submit ${selectedRows.size} Selected Task${selectedRows.size === 1 ? '' : 's'}`
                     )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Reminders || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      task.Reminders || "—"
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Attachment || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      task.Attachment || "—"
-                    )}
-                  </td>
-                </tr>
-              );
-            })
-          ) : (
-            <tr>
-              <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
-                {searchTerm || nameFilter || freqFilter
-                  ? "No tasks matching your filters"
-                  : userRole === 'admin' ? "No unique tasks available" : "No unique tasks assigned to you"}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-
-    {/* Mobile card view - replace existing mobile section with this */}
-    <div className="sm:hidden space-y-4 p-4" style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}>
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="flex flex-col items-center justify-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-            <p className="text-purple-600">Loading Unique task...</p>
-          </div>
-        </div>
-      ) : filteredChecklistTasks.length > 0 ? (
-        <>
-          {/* Select All Option - Mobile */}
-          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
-                onChange={handleSelectAll}
-                className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-              />
-              <span className="font-medium text-purple-700">
-                Select All ({selectedRows.size}/{filteredChecklistTasks.length})
-              </span>
-            </label>
-          </div>
-          
-          {filteredChecklistTasks.map((task) => {
-            const isEditing = editingRows.has(task._id);
-            const editedTask = editedData[task._id] || task;
-            const isSelected = selectedRows.has(task._id);
-            
-            return (
-              <div key={task._id} className={`bg-white border rounded-lg p-4 shadow-sm ${
-                isSelected ? 'border-purple-500 bg-purple-50' : 'border-gray-200'
-              } ${isEditing ? 'ring-2 ring-blue-200' : ''}`}>
-                {/* Checkbox at top of card */}
-                <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => handleRowSelection(task._id)}
-                      className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                    />
-                    <span className="font-medium text-gray-700">
-                      {isSelected ? 'Selected' : 'Select Task'}
-                    </span>
-                  </label>
-                  {isEditing && (
-                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
-                      Editing Mode
-                    </span>
-                  )}
+                  </button>
                 </div>
+              )}
 
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <span className="font-medium text-gray-700">Department:</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Department || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
+              <div className="hidden sm:block overflow-x-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0 z-20">
+                    <tr>
+                      {/* UPDATED: Only super_admin can see the Action column header */}
+                      {canAccessActionColumn && (
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
+                              onChange={handleSelectAll}
+                              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                            />
+                            <span className="ml-2">Action</span>
+                          </div>
+                        </th>
+                      )}
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50">
+                        Task ID
+                      </th>
+                      {[
+                        { key: 'Department', label: 'Department' },
+                        { key: 'Given By', label: 'Given By' },
+                        { key: 'Name', label: 'Name' },
+                        { key: 'Task Description', label: 'Task Description', minWidth: 'min-w-[300px]' },
+                        { key: 'End Date', label: 'End Date', bg: 'bg-yellow-50' },
+                        { key: 'Frequency', label: 'Frequency' },
+                        { key: 'Reminders', label: 'Reminders' },
+                        { key: 'Attachment', label: 'Attachment' },
+                      ].map((column) => (
+                        <th
+                          key={column.label}
+                          className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${column.bg || ''} ${column.minWidth || ''} ${column.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                          onClick={() => column.key && requestSort(column.key)}
+                        >
+                          <div className="flex items-center">
+                            {column.label}
+                            {sortConfig.key === column.key && (
+                              <span className="ml-1">
+                                {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {loading ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-8 text-center">
+                          <div className="flex flex-col items-center justify-center">
+                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
+                            <p className="text-purple-600">Loading Unique task...</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : filteredChecklistTasks.length > 0 ? (
+                      filteredChecklistTasks.map((task) => {
+                        const isEditing = editingRows.has(task._id);
+                        const editedTask = editedData[task._id] || task;
+                        const isSelected = selectedRows.has(task._id);
+
+                        return (
+                          <tr key={task._id} className={`hover:bg-gray-50 ${isEditing ? 'bg-blue-50' : ''}`}>
+                            {/* UPDATED: Only super_admin can see the Action column (checkbox & delete) */}
+                            {canAccessActionColumn && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleRowSelection(task._id)}
+                                    className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                  />
+                                  <div className="flex justify-center">
+                                    <button
+                                      onClick={() => handleDeleteTask(task)}
+                                      disabled={deleting === task._id}
+                                      className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                      title="Delete task"
+                                    >
+                                      {deleting === task._id ? (
+                                        <div className="h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            )}
+                            {/* NEW Task ID column */}
+                            {/* Task ID column - display from sheet */}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-green-50">
+                              {task['Task ID'] || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Department || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                task.Department || "—"
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask['Given By'] || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                task['Given By'] || "—"
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Name || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                task.Name || "—"
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500 min-w-[300px] max-w-[400px]">
+                              {isEditing ? (
+                                <textarea
+                                  value={editedTask['Task Description'] || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                  rows={2}
+                                />
+                              ) : (
+                                <div className="whitespace-normal break-words">
+                                  {task['Task Description'] || "—"}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 bg-yellow-50">
+                              {isEditing ? (
+                                <div className="flex gap-2 items-center">
+                                  <input
+                                    type="date"
+                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        const [year, month, day] = e.target.value.split('-');
+                                        handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
+                                      } else {
+                                        handleInputChange(task._id, 'End Date', '');
+                                      }
+                                    }}
+                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  />
+                                  <input
+                                    type="time"
+                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[1] || '00:00' : '00:00'}
+                                    onChange={(e) => {
+                                      const dateStr = editedTask['End Date']?.split(' ')[0] || '';
+                                      if (dateStr) {
+                                        const [hours, minutes] = e.target.value.split(':');
+                                        handleInputChange(task._id, 'End Date', `${dateStr} ${hours}:${minutes}:00`);
+                                      }
+                                    }}
+                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  />
+                                </div>
+                              ) : (
+                                formatDate(task['End Date']) || "—"
+                              )}
+                            </td>
+
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {isEditing ? (
+                                <select
+                                  value={editedTask.Frequency || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                >
+                                  <option value="">Select Frequency</option>
+                                  <option value="Daily">Daily</option>
+                                  <option value="Weekly">Weekly</option>
+                                  <option value="Monthly">Monthly</option>
+                                </select>
+                              ) : (
+                                <span className={`px-2 py-1 rounded-full text-xs ${task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' :
+                                  task.Frequency === 'Weekly' ? 'bg-green-100 text-green-800' :
+                                    task.Frequency === 'Monthly' ? 'bg-purple-100 text-purple-800' :
+                                      'bg-gray-100 text-gray-800'
+                                  }`}>
+                                  {task.Frequency || "—"}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Reminders || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                task.Reminders || "—"
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Attachment || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                task.Attachment || "—"
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
                     ) : (
-                      <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                        {task.Department || "—"}
-                      </div>
+                      <tr>
+                        <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
+                          {searchTerm || nameFilter || freqFilter
+                            ? "No tasks matching your filters"
+                            : isAdmin ? "No unique tasks available" : "No unique tasks assigned to you"}
+                        </td>
+                      </tr>
                     )}
-                  </div>
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <span className="font-medium text-gray-700">Given By:</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask['Given By'] || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                        {task['Given By'] || "—"}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <span className="font-medium text-gray-700">Name:</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Name || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                        {task.Name || "—"}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-start border-b pb-2">
-                    <span className="font-medium text-gray-700">Task Description:</span>
-                    {isEditing ? (
-                      <textarea
-                        value={editedTask['Task Description'] || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                        rows={2}
-                      />
-                    ) : (
-                      <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                        {task['Task Description'] || "—"}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center border-b pb-2">
-  <span className="font-medium text-gray-700">End Date:</span>
-  {isEditing ? (
-    <div className="flex gap-1 items-center w-[35%]">
-      <input
-        type="date"
-        value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
-        onChange={(e) => {
-          if (e.target.value) {
-            const [year, month, day] = e.target.value.split('-');
-            handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
-          } else {
-            handleInputChange(task._id, 'End Date', '');
-          }
-        }}
-        className="px-2 py-1 border border-gray-300 rounded text-sm"
-      />
-      <input
-        type="time"
-        value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[1] || '00:00' : '00:00'}
-        onChange={(e) => {
-          const dateStr = editedTask['End Date']?.split(' ')[0] || '';
-          if (dateStr) {
-            const [hours, minutes] = e.target.value.split(':');
-            handleInputChange(task._id, 'End Date', `${dateStr} ${hours}:${minutes}:00`);
-          }
-        }}
-        className="px-2 py-1 border border-gray-300 rounded text-sm"
-      />
-    </div>
-  ) : (
-    <div className="text-sm text-gray-900 break-words bg-yellow-50 px-2 py-1 rounded text-right w-[35%]">
-      {formatDate(task['End Date']) || "—"}
-    </div>
-  )}
-</div>
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <span className="font-medium text-gray-700">Frequency:</span>
-                    {isEditing ? (
-                      <select
-                        value={editedTask.Frequency || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                      >
-                        <option value="">Select Frequency</option>
-                        <option value="Daily">Daily</option>
-                        <option value="Weekly">Weekly</option>
-                        <option value="Monthly">Monthly</option>
-                      </select>
-                    ) : (
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' :
-                        task.Frequency === 'Weekly' ? 'bg-green-100 text-green-800' :
-                        task.Frequency === 'Monthly' ? 'bg-purple-100 text-purple-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {task.Frequency || "—"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <span className="font-medium text-gray-700">Reminders:</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Reminders || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                        {task.Reminders || "—"}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium text-gray-700">Attachment:</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedTask.Attachment || ''}
-                        onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
-                        className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      <div className="text-sm text-gray-900 break-words text-right w-[35%]">
-                        {task.Attachment || "—"}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  </tbody>
+                </table>
               </div>
-            );
-          })}
-        </>
-      ) : (
-        <div className="text-center text-gray-500 py-8">
-          {searchTerm || nameFilter || freqFilter
-            ? "No tasks matching your filters"
-            : userRole === 'admin' ? "No unique tasks available" : "No unique tasks assigned to you"}
-        </div>
-      )}
-    </div>
-  </div>
-) : (
+
+              {/* Mobile card view - replace existing mobile section with this */}
+              <div className="sm:hidden space-y-4 p-4" style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}>
+                {loading ? (
+                  <div className="text-center py-8">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
+                      <p className="text-purple-600">Loading Unique task...</p>
+                    </div>
+                  </div>
+                ) : filteredChecklistTasks.length > 0 ? (
+                  <>
+                    {/* Select All Option - Mobile */}
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedRows.size === filteredChecklistTasks.length && filteredChecklistTasks.length > 0}
+                          onChange={handleSelectAll}
+                          className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                        />
+                        <span className="font-medium text-purple-700">
+                          Select All ({selectedRows.size}/{filteredChecklistTasks.length})
+                        </span>
+                      </label>
+                    </div>
+
+                    {filteredChecklistTasks.map((task) => {
+                      const isEditing = editingRows.has(task._id);
+                      const editedTask = editedData[task._id] || task;
+                      const isSelected = selectedRows.has(task._id);
+
+                      return (
+                        <div key={task._id} className={`bg-white border rounded-lg p-4 shadow-sm ${isSelected ? 'border-purple-500 bg-purple-50' : 'border-gray-200'
+                          } ${isEditing ? 'ring-2 ring-blue-200' : ''}`}>
+                          {/* Checkbox at top of card */}
+                          <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-200">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleRowSelection(task._id)}
+                                className="h-5 w-5 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                              />
+                              <span className="font-medium text-gray-700">
+                                {isSelected ? 'Selected' : 'Select Task'}
+                              </span>
+                            </label>
+                            {isEditing && (
+                              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                                Editing Mode
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="font-medium text-gray-700">Department:</span>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Department || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Department', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
+                                  {task.Department || "—"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="font-medium text-gray-700">Given By:</span>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask['Given By'] || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Given By', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
+                                  {task['Given By'] || "—"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="font-medium text-gray-700">Name:</span>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Name || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Name', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
+                                  {task.Name || "—"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-start border-b pb-2">
+                              <span className="font-medium text-gray-700">Task Description:</span>
+                              {isEditing ? (
+                                <textarea
+                                  value={editedTask['Task Description'] || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Task Description', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                  rows={2}
+                                />
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
+                                  {task['Task Description'] || "—"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="font-medium text-gray-700">End Date:</span>
+                              {isEditing ? (
+                                <div className="flex gap-1 items-center w-[35%]">
+                                  <input
+                                    type="date"
+                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[0].split('/').reverse().join('-') : ''}
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        const [year, month, day] = e.target.value.split('-');
+                                        handleInputChange(task._id, 'End Date', `${day}/${month}/${year} 00:00:00`);
+                                      } else {
+                                        handleInputChange(task._id, 'End Date', '');
+                                      }
+                                    }}
+                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  />
+                                  <input
+                                    type="time"
+                                    value={editedTask['End Date'] ? editedTask['End Date'].split(' ')[1] || '00:00' : '00:00'}
+                                    onChange={(e) => {
+                                      const dateStr = editedTask['End Date']?.split(' ')[0] || '';
+                                      if (dateStr) {
+                                        const [hours, minutes] = e.target.value.split(':');
+                                        handleInputChange(task._id, 'End Date', `${dateStr} ${hours}:${minutes}:00`);
+                                      }
+                                    }}
+                                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words bg-yellow-50 px-2 py-1 rounded text-right w-[35%]">
+                                  {formatDate(task['End Date']) || "—"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="font-medium text-gray-700">Frequency:</span>
+                              {isEditing ? (
+                                <select
+                                  value={editedTask.Frequency || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Frequency', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                >
+                                  <option value="">Select Frequency</option>
+                                  <option value="Daily">Daily</option>
+                                  <option value="Weekly">Weekly</option>
+                                  <option value="Monthly">Monthly</option>
+                                </select>
+                              ) : (
+                                <span className={`px-2 py-1 rounded-full text-xs ${task.Frequency === 'Daily' ? 'bg-blue-100 text-blue-800' :
+                                  task.Frequency === 'Weekly' ? 'bg-green-100 text-green-800' :
+                                    task.Frequency === 'Monthly' ? 'bg-purple-100 text-purple-800' :
+                                      'bg-gray-100 text-gray-800'
+                                  }`}>
+                                  {task.Frequency || "—"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center border-b pb-2">
+                              <span className="font-medium text-gray-700">Reminders:</span>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Reminders || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Reminders', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
+                                  {task.Reminders || "—"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="font-medium text-gray-700">Attachment:</span>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={editedTask.Attachment || ''}
+                                  onChange={(e) => handleInputChange(task._id, 'Attachment', e.target.value)}
+                                  className="w-[35%] px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              ) : (
+                                <div className="text-sm text-gray-900 break-words text-right w-[35%]">
+                                  {task.Attachment || "—"}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <div className="text-center text-gray-500 py-8">
+                    {searchTerm || nameFilter || freqFilter
+                      ? "No tasks matching your filters"
+                      : isAdmin ? "No unique tasks available" : "No unique tasks assigned to you"}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
             <DelegationPage
               searchTerm={searchTerm}
               nameFilter={nameFilter}
@@ -1296,7 +1430,8 @@ const fetchChecklistData = useCallback(async () => {
             />
           )}
         </>
-      )}
-    </AdminLayout>
+      )
+      }
+    </AdminLayout >
   );
 }

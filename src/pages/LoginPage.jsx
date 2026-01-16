@@ -40,7 +40,7 @@ const LoginPage = () => {
     useEffect(() => {
         const fetchMasterData = async () => {
             const SCRIPT_URL =
-                "https://script.google.com/macros/s/AKfycbwcmMvtW0SIzCnaVf_b5Z2-RXc6Ujo9i0uJAfwLilw7s3I9CIgBpE8RENgy8abKV08G/exec";
+                "https://script.google.com/macros/s/AKfycbxG7zW6AabjyxnEDh9JIKMp978w_ik7xzcDy1rCygg3UFFDxYZW6D6rAuxcVHRVaE0O/exec";
 
             try {
                 setIsDataLoading(true);
@@ -180,11 +180,11 @@ const LoginPage = () => {
                     // Store user info in sessionStorage
                     sessionStorage.setItem("username", trimmedUsername);
 
-                    // Check if user is admin - explicitly compare with the string "admin"
-                    const isAdmin = userRole === "admin";
+                    // Check if user is admin - include superadmin and super_admin
+                    const isAdmin = userRole === "admin" || userRole === "superadmin" || userRole === "super_admin";
 
                     // Set role based on the fetched role
-                    sessionStorage.setItem("role", isAdmin ? "admin" : "user");
+                    sessionStorage.setItem("role", userRole); // Store the actual role
 
                     // For admin users, we don't want to restrict by department
                     if (isAdmin) {

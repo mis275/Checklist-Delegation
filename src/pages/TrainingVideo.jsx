@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { X, Play, Users, User, Video } from 'lucide-react'
 import AdminLayout from "../components/layout/AdminLayout";
 
-const TrainingVideo  = () => {
+const TrainingVideo = () => {
     const [userRole, setUserRole] = useState("")
     const [username, setUsername] = useState("")
     const [isVideoPlaying, setIsVideoPlaying] = useState(false)
