@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AdminLayout from '../../components/layout/AdminLayout'
 import { Plus, User, Building, X, Save, Edit, Trash2, Search, ChevronDown, Loader2, Building2, Users, RefreshCw, Pencil, LogOut, Upload } from 'lucide-react'
@@ -60,7 +60,33 @@ function Settings() {
     const [checklistTasks, setChecklistTasks] = useState([])
     const [checklistLoading, setChecklistLoading] = useState(false)
     const [selectedChecklistTaskIds, setSelectedChecklistTaskIds] = useState([])
+    const [allChecklistRows, setAllChecklistRows] = useState(null)
+    const [checklistHeaders, setChecklistHeaders] = useState([])
     const [debugInfo, setDebugInfo] = useState(null)
+
+    // Memoized unique rows for the leave tab
+    const uniqueLeaveRows = useMemo(() => {
+        if (!leaveData || leaveData.length === 0) return []
+        const headers = leaveData[0]?.headers || []
+        const nameIdx = (() => {
+            const i = headers.findIndex(h => {
+                const l = h?.toLowerCase() || ''
+                return l.includes('name') || l.includes('doer') || l.includes('user')
+            })
+            return i !== -1 ? i : 3
+        })()
+
+        const seen = new Set()
+        const unique = []
+        for (const row of leaveData) {
+            const name = String(row.values[nameIdx] || '').trim().toLowerCase()
+            if (name && !seen.has(name)) {
+                seen.add(name)
+                unique.push(row)
+            }
+        }
+        return unique
+    }, [leaveData])
 
     // Fetch leave data when tab is active
     useEffect(() => {
@@ -251,31 +277,40 @@ function Settings() {
             setChecklistLoading(true)
             setChecklistTasks([])
 
-            const response = await fetch(
-                `${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.CHECKLIST_SHEET_NAME}&action=fetch`
-            )
-
-            if (!response.ok) throw new Error("Failed to fetch checklist data")
-
-            const txt = await response.text()
             let allRows = []
+            let headers = checklistHeaders
 
-            try {
-                const parsed = JSON.parse(txt)
-                if (parsed.table && parsed.table.rows) allRows = parsed.table.rows
-                else if (Array.isArray(parsed)) allRows = parsed
-                else if (parsed.values) allRows = parsed.values.map(r => ({ c: r.map(v => ({ v: v })) }))
-            } catch (e) {
-                const jsonStart = txt.indexOf("{")
-                const jsonEnd = txt.lastIndexOf("}")
-                if (jsonStart !== -1 && jsonEnd !== -1) {
-                    const parsed = JSON.parse(txt.substring(jsonStart, jsonEnd + 1))
+            if (allChecklistRows) {
+                allRows = allChecklistRows
+            } else {
+                const response = await fetch(
+                    `${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.CHECKLIST_SHEET_NAME}&action=fetch`
+                )
+
+                if (!response.ok) throw new Error("Failed to fetch checklist data")
+
+                const txt = await response.text()
+
+                try {
+                    const parsed = JSON.parse(txt)
                     if (parsed.table && parsed.table.rows) allRows = parsed.table.rows
+                    else if (Array.isArray(parsed)) allRows = parsed
+                    else if (parsed.values) allRows = parsed.values.map(r => ({ c: r.map(v => ({ v: v })) }))
+                } catch (e) {
+                    const jsonStart = txt.indexOf("{")
+                    const jsonEnd = txt.lastIndexOf("}")
+                    if (jsonStart !== -1 && jsonEnd !== -1) {
+                        const parsed = JSON.parse(txt.substring(jsonStart, jsonEnd + 1))
+                        if (parsed.table && parsed.table.rows) allRows = parsed.table.rows
+                    }
                 }
+
+                // Get headers from row 0
+                headers = allRows[0]?.c?.map(c => c?.v) || []
+                setAllChecklistRows(allRows)
+                setChecklistHeaders(headers)
             }
 
-            // Get headers from row 0
-            const headers = allRows[0]?.c?.map(c => c?.v) || []
             console.log("Checklist Headers:", headers)
             const doerIndex = headers.findIndex(h =>
                 h?.toString().toLowerCase().includes('name') ||
@@ -289,7 +324,7 @@ function Settings() {
             const taskIdIdx = (() => {
                 const i = headers.findIndex(h => {
                     const l = h?.toString().toLowerCase() || ''
-                    return l.includes('task id') || l.includes('task id') || l === 'id'
+                    return l.includes('task id') || l.includes('id')
                 })
                 return i !== -1 ? i : 1
             })()
@@ -308,7 +343,16 @@ function Settings() {
                 return i !== -1 ? i : 6
             })()
 
-            console.log("Searching for User:", userName, "| ID col:", taskIdIdx, "| Desc col:", descIdx, "| Date col:", dateColIdx)
+            const remarksIdx = (() => {
+                const i = headers.findIndex(h => {
+                    const l = h?.toString().toLowerCase() || ''
+                    return l.includes('remark')
+                })
+                // Fallback to index 13 if not found by name, as seen in handleTransferSubmit
+                return i !== -1 ? i : 13
+            })()
+
+            console.log("Searching for User:", userName, "| ID col:", taskIdIdx, "| Desc col:", descIdx, "| Date col:", dateColIdx, "| Remarks col:", remarksIdx)
 
             const userTasks = allRows.slice(1).map((row, idx) => {
                 let vals = []
@@ -316,15 +360,22 @@ function Settings() {
                 else if (Array.isArray(row)) vals = row
 
                 const assignee = doerIndex !== -1 ? vals[doerIndex] : vals[5]
-                if (idx < 5) console.log(`Row ${idx} Assignee:`, assignee, "Target:", userName)
 
-                // Match user name (trim + lowercase, allow partial)
+                // Match user name + Check if task already has a remark (frontend-only filter)
+                // Also ignore tasks that are already "DONE"
                 const aName = String(assignee || '').trim().toLowerCase()
                 const uName = String(userName || '').trim().toLowerCase()
                 // Strict exact match — prevents tasks from other users bleeding through
                 const isAssignedToUser = aName !== '' && uName !== '' && aName === uName
+                
+                const statusIdx = 12 // Standard for this sheet
+                const statusValue = String(vals[statusIdx] || '').trim().toUpperCase()
+                const isDone = statusValue === 'DONE'
 
-                if (isAssignedToUser) {
+                const remarkValue = remarksIdx !== -1 ? String(vals[remarksIdx] || '').trim() : ''
+                const hasNoRemark = remarkValue === ''
+
+                if (isAssignedToUser && !isDone && hasNoRemark) {
                     return {
                         id: vals[taskIdIdx],
                         description: vals[descIdx],
@@ -335,6 +386,7 @@ function Settings() {
                 }
                 return null
             }).filter(t => t !== null)
+
 
             setChecklistTasks(userTasks)
 
@@ -407,37 +459,49 @@ function Settings() {
             const endDateStr = formatDateTime(transferForm.endDate)
             const remarkText = `Leave from ${startDateStr} to ${endDateStr}`
 
-            const promises = selectedChecklistTaskIds.map(async (taskId) => {
+            // OPTIMIZATION: Send all task updates in a single API call using the backend's 'updateTaskData' feature
+            const payloadTasks = selectedChecklistTaskIds.map(taskId => {
                 const task = checklistTasks.find(t => t.id === taskId)
                 if (!task) return null
 
-                let fullRowData = [...task.allValues]
-                while (fullRowData.length < 14) fullRowData.push("")
+                return {
+                    rowIndex: task.originalRowIndex,
+                    taskId: task.id,
+                    actualDate: (() => {
+                        const d = new Date();
+                        const dd = String(d.getDate()).padStart(2, '0');
+                        const mm = String(d.getMonth() + 1).padStart(2, '0');
+                        const yyyy = d.getFullYear();
+                        const hh = String(d.getHours()).padStart(2, '0');
+                        const min = String(d.getMinutes()).padStart(2, '0');
+                        const ss = String(d.getSeconds()).padStart(2, '0');
+                        return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`;
+                    })(),
+                    remarks: remarkText
+                }
+            }).filter(t => t !== null)
 
-                // Do NOT submit Task ID — clear the Task ID column (index 1) before posting
-                fullRowData[1] = ""
-
-                // Column K (index 10): submission timestamp in DD/MM/YYYY HH:MM:SS format
-                fullRowData[10] = formatDateTime(new Date().toISOString())
-
-                // Column L (index 11): do NOT submit any delay value
-                fullRowData[11] = ""
-
-                fullRowData[13] = remarkText
-
-                return fetch(CONFIG.APPS_SCRIPT_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        sheetName: CONFIG.CHECKLIST_SHEET_NAME,
-                        action: 'update',
-                        rowIndex: String(task.originalRowIndex),
-                        rowData: JSON.stringify(fullRowData)
-                    })
+            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    sheetName: CONFIG.CHECKLIST_SHEET_NAME,
+                    action: 'updateTaskData',
+                    rowData: JSON.stringify(payloadTasks)
                 })
             })
 
-            await Promise.all(promises)
+            if (!response.ok) {
+                throw new Error("HTTP error " + response.status)
+            }
+            const result = await response.json()
+            if (!result.success) {
+                throw new Error(result.error || "Batch update failed on the server")
+            }
+
+            // Invalidate cache so fresh data is fetched next time
+            setAllChecklistRows(null)
+            setChecklistTasks([])
 
             setSuccessMessage(`${selectedChecklistTaskIds.length} tasks transferred successfully!`)
             setTimeout(() => setSuccessMessage(''), 3000)
@@ -1222,38 +1286,6 @@ function Settings() {
                                     <p>No records found in Unique sheet.</p>
                                 </div>
                             ) : (() => {
-                                // ── Deduplicate by user name ──
-                                // We identify the name, department, and given-by columns from headers,
-                                // then keep only the FIRST occurrence of each unique user name.
-                                const headers = leaveData[0]?.headers || []
-
-                                const nameIdx = (() => {
-                                    const i = headers.findIndex(h => {
-                                        const l = h?.toLowerCase() || ''
-                                        return l.includes('name') || l.includes('doer') || l.includes('user')
-                                    })
-                                    return i !== -1 ? i : 3
-                                })()
-
-                                const deptIdx = (() => {
-                                    const i = headers.findIndex(h => h?.toLowerCase().includes('dept') || h?.toLowerCase().includes('department'))
-                                    return i !== -1 ? i : 0
-                                })()
-
-                                const givenByIdx = (() => {
-                                    const i = headers.findIndex(h => h?.toLowerCase().includes('given') || h?.toLowerCase().includes('assignee'))
-                                    return i !== -1 ? i : 1
-                                })()
-
-                                // Keep one row per unique name (first occurrence wins)
-                                const seen = new Set()
-                                const uniqueRows = leaveData.filter(row => {
-                                    const name = String(row.values[nameIdx] || '').trim().toLowerCase()
-                                    if (!name || seen.has(name)) return false
-                                    seen.add(name)
-                                    return true
-                                })
-
                                 return (
                                     <table className="min-w-full divide-y divide-gray-200">
                                         <thead className="bg-gray-50 sticky top-0 z-10">
@@ -1273,7 +1305,26 @@ function Settings() {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-100">
-                                            {uniqueRows.map((row, rowIndex) => {
+                                            {uniqueLeaveRows.map((row, rowIndex) => {
+                                                const headers = leaveData[0]?.headers || []
+                                                const deptIdx = (() => {
+                                                    const i = headers.findIndex(h => h?.toLowerCase().includes('dept') || h?.toLowerCase().includes('department'))
+                                                    return i !== -1 ? i : 0
+                                                })()
+
+                                                const givenByIdx = (() => {
+                                                    const i = headers.findIndex(h => h?.toLowerCase().includes('given') || h?.toLowerCase().includes('assignee'))
+                                                    return i !== -1 ? i : 1
+                                                })()
+
+                                                const nameIdx = (() => {
+                                                    const i = headers.findIndex(h => {
+                                                        const l = h?.toLowerCase() || ''
+                                                        return l.includes('name') || l.includes('doer') || l.includes('user')
+                                                    })
+                                                    return i !== -1 ? i : 3
+                                                })()
+
                                                 const dept = row.values[deptIdx] || '—'
                                                 const givenBy = row.values[givenByIdx] || '—'
                                                 const name = row.values[nameIdx] || '—'
@@ -1473,6 +1524,8 @@ function Settings() {
             {showTransferModal && transferTask && (() => {
                 // Robust date parser — handles ISO strings, DD/MM/YYYY, and
                 // Google Sheets' Date(year,month,day) serial format
+                // Robust date parser — handles ISO strings, DD/MM/YYYY, and
+                // Google Sheets' Date(year,month,day) serial format
                 const parseDate = (dateStr) => {
                     if (!dateStr) return null
                     const s = String(dateStr).trim()
@@ -1505,28 +1558,29 @@ function Settings() {
                     return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`
                 }
 
+                // Use an inline filter that is relatively fast but could be memoized
+                // We'll calculate it once per render within this block.
                 const filterStart = parseDate(transferForm.startDate)
                 const filterEnd = parseDate(transferForm.endDate)
-
-                // Normalise filterEnd to end-of-day so tasks on that day are included
                 if (filterEnd) filterEnd.setHours(23, 59, 59, 999)
 
-                const filteredTasks = checklistTasks.filter(task => {
-                    // No date selected → show ALL tasks for this user
-                    if (!filterStart && !filterEnd) return true
-
+                const filteredTasks = []
+                for (const task of checklistTasks) {
+                    if (!filterStart && !filterEnd) {
+                        filteredTasks.push(task)
+                        continue
+                    }
                     const taskDate = parseDate(task.date)
-                    // If date filter active but task date unparseable → hide
-                    if (!taskDate) return false
+                    if (!taskDate) continue
 
-                    // Both dates selected → show tasks within range
-                    if (filterStart && filterEnd) return taskDate >= filterStart && taskDate <= filterEnd
-                    // Only start date → show tasks from that date onwards
-                    if (filterStart) return taskDate >= filterStart
-                    // Only end date → show tasks up to that date
-                    if (filterEnd) return taskDate <= filterEnd
-                    return true
-                })
+                    if (filterStart && filterEnd) {
+                        if (taskDate >= filterStart && taskDate <= filterEnd) filteredTasks.push(task)
+                    } else if (filterStart) {
+                        if (taskDate >= filterStart) filteredTasks.push(task)
+                    } else if (filterEnd) {
+                        if (taskDate <= filterEnd) filteredTasks.push(task)
+                    }
+                }
 
                 return (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
