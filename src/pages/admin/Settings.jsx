@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AdminLayout from '../../components/layout/AdminLayout'
-import { Plus, User, Building, X, Save, Edit, Trash2, Search, ChevronDown, Loader2, Building2, Users, RefreshCw, Pencil, LogOut, Upload } from 'lucide-react'
+import { Plus, User, Building, X, Save, Edit, Trash2, Search, ChevronDown, Loader2, Building2, Users, RefreshCw, Pencil, LogOut, Upload, History, Calendar } from 'lucide-react'
 
 // Configuration
 const CONFIG = {
@@ -63,6 +63,14 @@ function Settings() {
     const [allChecklistRows, setAllChecklistRows] = useState(null)
     const [checklistHeaders, setChecklistHeaders] = useState([])
     const [debugInfo, setDebugInfo] = useState(null)
+    
+    // Leave History states
+    const [leaveHistoryData, setLeaveHistoryData] = useState([])
+    const [leaveHistoryLoading, setLeaveHistoryLoading] = useState(false)
+    const [leaveHistoryError, setLeaveHistoryError] = useState(null)
+    const [leaveHistoryNameFilter, setLeaveHistoryNameFilter] = useState('')
+    const [leaveHistoryStartDate, setLeaveHistoryStartDate] = useState('')
+    const [leaveHistoryEndDate, setLeaveHistoryEndDate] = useState('')
 
     // Memoized unique rows for the leave tab
     const uniqueLeaveRows = useMemo(() => {
@@ -94,6 +102,13 @@ function Settings() {
             fetchLeaveData()
         }
     }, [activeTab, authorized, leaveData.length])
+
+    // Fetch leave history when tab is active
+    useEffect(() => {
+        if (authorized && activeTab === 'leave_history' && leaveHistoryData.length === 0) {
+            fetchLeaveHistoryData()
+        }
+    }, [activeTab, authorized, leaveHistoryData.length])
 
     // Check authorization on mount
     useEffect(() => {
@@ -271,6 +286,115 @@ function Settings() {
         }
     }
 
+    const fetchLeaveHistoryData = async () => {
+        try {
+            setLeaveHistoryLoading(true)
+            setLeaveHistoryError(null)
+
+            const response = await fetch(
+                `${CONFIG.APPS_SCRIPT_URL}?sheet=${CONFIG.CHECKLIST_SHEET_NAME}&action=fetch`
+            )
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch data: ${response.status}`)
+            }
+
+            const responseText = await response.text()
+            let allRows = []
+
+            try {
+                const parsed = JSON.parse(responseText)
+                if (parsed.table && parsed.table.rows) {
+                    allRows = parsed.table.rows
+                } else if (Array.isArray(parsed)) {
+                    allRows = parsed
+                } else if (parsed.values) {
+                    allRows = parsed.values.map((row) => ({
+                        c: row.map((val) => ({ v: val })),
+                    }))
+                }
+            } catch (parseError) {
+                const jsonStart = responseText.indexOf("{")
+                const jsonEnd = responseText.lastIndexOf("}")
+                if (jsonStart !== -1 && jsonEnd !== -1) {
+                    const jsonString = responseText.substring(jsonStart, jsonEnd + 1)
+                    const parsed = JSON.parse(jsonString)
+                    if (parsed.table && parsed.table.rows) {
+                        allRows = parsed.table.rows
+                    }
+                } else {
+                    throw new Error("Invalid JSON response from server")
+                }
+            }
+
+            if (allRows.length === 0) {
+                setLeaveHistoryData([])
+                return
+            }
+
+            // Get headers from first row
+            const headers = allRows[0]?.c?.map(c => c?.v) || allRows[0] || []
+            
+            // Find column indices
+            const remarksIdx = headers.findIndex(h => h?.toString().toLowerCase().includes('remark'))
+            const nameIdx = headers.findIndex(h => 
+                h?.toString().toLowerCase().includes('name') || 
+                h?.toString().toLowerCase().includes('doer') || 
+                h?.toString().toLowerCase().includes('user')
+            )
+            const dateIdx = headers.findIndex(h => 
+                h?.toString().toLowerCase().includes('date') || 
+                h?.toString().toLowerCase().includes('time')
+            )
+            // Task ID is in Column F (Index 5)
+            const taskIdIdx = (() => {
+                const i = headers.findIndex(h => {
+                    const l = h?.toString().toLowerCase() || ''
+                    return l === 'task id' || l === 'id' || l === 'taskid'
+                })
+                return i !== -1 ? i : 5
+            })()
+            // Task Description is in Column B (Index 1)
+            const descIdx = (() => {
+                const i = headers.findIndex(h => {
+                    const l = h?.toString().toLowerCase() || ''
+                    return l.includes('description') || l.includes('desc') || l === 'task'
+                })
+                return i !== -1 ? i : 1
+            })()
+
+            const leaves = allRows.slice(1).map((row, idx) => {
+                let vals = []
+                if (row.c) vals = row.c.map(c => c?.v)
+                else if (Array.isArray(row)) vals = row
+
+                const remarkValue = String(vals[remarksIdx] || '').trim()
+                const isLeave = remarkValue.toLowerCase().includes('leave')
+
+                if (isLeave) {
+                    return {
+                        id: idx,
+                        _rowIndex: idx + 2,
+                        date: vals[dateIdx],
+                        name: vals[nameIdx],
+                        taskId: vals[taskIdIdx],
+                        description: vals[descIdx],
+                        remarks: remarkValue,
+                        allValues: vals
+                    }
+                }
+                return null
+            }).filter(Boolean)
+
+            setLeaveHistoryData(leaves)
+        } catch (err) {
+            console.error("Error fetching Leave History:", err)
+            setLeaveHistoryError(err.message)
+        } finally {
+            setLeaveHistoryLoading(false)
+        }
+    }
+
     // Fetch checklist tasks for a specific user
     const fetchUserChecklistTasks = async (userName) => {
         try {
@@ -320,20 +444,20 @@ function Settings() {
             )
 
             // Pre-calculate column indices from headers (case-insensitive keyword match)
-            // Fallbacks match known sheet layout: Task ID=col B(1), Description=col F(5), Date=col G(6)
+            // Task ID = Column F (Index 5), Description = Column B (Index 1), Date = Column G (Index 6)
             const taskIdIdx = (() => {
                 const i = headers.findIndex(h => {
                     const l = h?.toString().toLowerCase() || ''
-                    return l.includes('task id') || l.includes('id')
+                    return l === 'task id' || l === 'id' || l === 'taskid'
                 })
-                return i !== -1 ? i : 1
+                return i !== -1 ? i : 5
             })()
             const descIdx = (() => {
                 const i = headers.findIndex(h => {
                     const l = h?.toString().toLowerCase() || ''
-                    return l.includes('description') || l.includes('desc') || l.includes('task name') || l.includes('task description')
+                    return l.includes('description') || l.includes('desc') || l.includes('task name') || l.includes('task description') || l === 'task'
                 })
-                return i !== -1 ? i : 5
+                return i !== -1 ? i : 1
             })()
             const dateColIdx = (() => {
                 const i = headers.findIndex(h => {
@@ -892,6 +1016,13 @@ function Settings() {
                                 <LogOut size={18} className="mr-2" />
                                 Leave
                             </button>
+                            <button
+                                className={`flex px-4 py-3 text-sm font-medium transition-colors ${activeTab === 'leave_history' ? 'bg-purple-600 text-white' : 'bg-white text-purple-600 hover:bg-purple-50'}`}
+                                onClick={() => setActiveTab('leave_history')}
+                            >
+                                <History size={18} className="mr-2" />
+                                Leave History
+                            </button>
                         </div>
 
                         <button
@@ -994,15 +1125,15 @@ function Settings() {
                             </div>
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-200">
                             {loading ? (
                                 <div className="flex flex-col justify-center items-center py-24 gap-3">
                                     <Loader2 className="h-12 w-12 text-purple-600 animate-spin" />
                                     <p className="text-purple-600 font-medium animate-pulse">Fetching users...</p>
                                 </div>
                             ) : (
-                                <table className="min-w-full divide-y divide-purple-100">
-                                    <thead className="bg-purple-50/50">
+                                <table className="min-w-full divide-y divide-purple-100 shadow-sm">
+                                    <thead className="bg-purple-50 sticky top-0 z-20 shadow-sm shadow-purple-100/50">
                                         <tr>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest">Department</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-purple-700 uppercase tracking-widest">Given By</th>
@@ -1358,6 +1489,198 @@ function Settings() {
                         </div>
                     </div>
                 )}
+
+                {/* Leave History Tab */}
+                {activeTab === 'leave_history' && (() => {
+                    // Date parser for filtering
+                    const parseDate = (dStr) => {
+                        if (!dStr) return null
+                        const s = String(dStr).trim()
+                        // Google Sheets Date(y,m,d)
+                        const gsMatch = s.match(/^Date\((\d+),(\d+),(\d+)\)$/)
+                        if (gsMatch) return new Date(Number(gsMatch[1]), Number(gsMatch[2]), Number(gsMatch[3]))
+                        // DD/MM/YYYY
+                        const dmyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+                        if (dmyMatch) return new Date(`${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`)
+                        const d = new Date(s)
+                        return isNaN(d.getTime()) ? null : d
+                    }
+
+                    const start = leaveHistoryStartDate ? new Date(leaveHistoryStartDate) : null
+                    const end = leaveHistoryEndDate ? new Date(leaveHistoryEndDate) : null
+                    if (end) end.setHours(23, 59, 59, 999)
+
+                    const filtered = leaveHistoryData.filter(row => {
+                        // Filter by Name (exact match from dropdown)
+                        if (leaveHistoryNameFilter && row.name !== leaveHistoryNameFilter) return false
+                        
+                        // Filter by Date
+                        if (start || end) {
+                            const taskDate = parseDate(row.date)
+                            if (!taskDate) return false
+                            if (start && taskDate < start) return false
+                            if (end && taskDate > end) return false
+                        }
+                        return true
+                    })
+
+                    const uniqueNames = [...new Set(leaveHistoryData.map(row => row.name).filter(Boolean))].sort()
+
+                    return (
+                        <div className="bg-white shadow-xl rounded-2xl overflow-hidden border border-purple-100 transition-all hover:shadow-2xl">
+                            <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 px-6 py-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-purple-600 rounded-lg shadow-lg">
+                                        <History className="text-white" size={20} />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-3">
+                                            <h2 className="text-lg font-bold text-purple-800">Leave History Analytics</h2>
+                                            {!leaveHistoryLoading && !leaveHistoryError && (
+                                                <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded-full border border-purple-200 uppercase tracking-tighter">
+                                                    {filtered.length} {filtered.length === 1 ? 'Record' : 'Records'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-[10px] text-purple-400 font-medium tracking-tight">Track and analyze historical leave data</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-3">
+                                    {/* Name Filter Dropdown */}
+                                    <div className="relative group">
+                                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-400 group-focus-within:text-purple-600 transition-colors pointer-events-none" size={16} />
+                                        <select
+                                            value={leaveHistoryNameFilter}
+                                            onChange={(e) => setLeaveHistoryNameFilter(e.target.value)}
+                                            className="w-44 pl-9 pr-8 py-2 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs bg-white transition-all shadow-sm appearance-none cursor-pointer font-medium text-gray-700"
+                                        >
+                                            <option value="">All Doers</option>
+                                            {uniqueNames.map(name => (
+                                                <option key={name} value={name}>{name}</option>
+                                            ))}
+                                        </select>
+                                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none text-purple-400 group-focus-within:text-purple-600 transition-colors">
+                                            <ChevronDown size={14} />
+                                        </div>
+                                    </div>
+
+                                    {/* Date Range */}
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative">
+                                            <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-400" size={14} />
+                                            <input
+                                                type="date"
+                                                value={leaveHistoryStartDate}
+                                                onChange={(e) => setLeaveHistoryStartDate(e.target.value)}
+                                                className="pl-9 pr-3 py-2 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs bg-white shadow-sm"
+                                            />
+                                        </div>
+                                        <span className="text-purple-400 text-sm font-medium">to</span>
+                                        <div className="relative">
+                                            <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-400" size={14} />
+                                            <input
+                                                type="date"
+                                                value={leaveHistoryEndDate}
+                                                onChange={(e) => setLeaveHistoryEndDate(e.target.value)}
+                                                className="pl-9 pr-3 py-2 border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs bg-white shadow-sm"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={fetchLeaveHistoryData}
+                                        className="p-2 text-purple-600 hover:bg-purple-600 hover:text-white rounded-xl transition-all bg-white border border-purple-100 shadow-sm active:scale-95"
+                                        title="Refresh History"
+                                    >
+                                        <RefreshCw size={18} className={leaveHistoryLoading ? 'animate-spin' : ''} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: '60vh' }}>
+                                {leaveHistoryLoading ? (
+                                    <div className="flex flex-col justify-center items-center py-24 gap-3">
+                                        <div className="relative">
+                                            <Loader2 className="h-12 w-12 text-purple-600 animate-spin" />
+                                            <History className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-purple-300" size={16} />
+                                        </div>
+                                        <p className="text-purple-600 font-bold animate-pulse text-xs uppercase tracking-widest">Analyzing history...</p>
+                                    </div>
+                                ) : leaveHistoryError ? (
+                                    <div className="p-16 text-center">
+                                        <div className="inline-flex p-4 rounded-full bg-red-50 text-red-500 mb-4 border border-red-100">
+                                            <X size={24} />
+                                        </div>
+                                        <h3 className="text-red-800 font-bold mb-2">Fetch Failed</h3>
+                                        <p className="text-gray-500 mb-6 text-sm max-w-xs mx-auto">Error loading history: {leaveHistoryError}</p>
+                                        <button onClick={fetchLeaveHistoryData} className="px-8 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-bold shadow-lg shadow-purple-200 hover:opacity-90 transition-all active:scale-95 text-xs">Retry Now</button>
+                                    </div>
+                                ) : filtered.length === 0 ? (
+                                    <div className="p-24 text-center">
+                                        <div className="inline-flex p-4 rounded-full bg-purple-50 text-purple-300 mb-4">
+                                            <History size={32} />
+                                        </div>
+                                        <p className="text-gray-400 text-sm italic">No leave records match your current filters.</p>
+                                        {(leaveHistoryNameFilter || leaveHistoryStartDate || leaveHistoryEndDate) && (
+                                            <button 
+                                                onClick={() => {
+                                                    setLeaveHistoryNameFilter('')
+                                                    setLeaveHistoryStartDate('')
+                                                    setLeaveHistoryEndDate('')
+                                                }}
+                                                className="mt-4 text-xs font-bold text-purple-600 hover:underline"
+                                            >
+                                                Clear all filters
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (() => {
+                                    // Robust Date Formatter for Table Display
+                                    const formatTableDate = (val) => {
+                                        const d = parseDate(val)
+                                        if (!d) return String(val || '—')
+                                        const day = String(d.getDate()).padStart(2, '0')
+                                        const month = String(d.getMonth() + 1).padStart(2, '0')
+                                        const year = d.getFullYear()
+                                        return `${day}/${month}/${year}`
+                                    }
+
+                                    return (
+                                        <table className="min-w-full divide-y divide-purple-100">
+                                            <thead className="bg-purple-50/50 sticky top-0 z-20 backdrop-blur-md">
+                                                <tr>
+                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Date</th>
+                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Doer Name</th>
+                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Task ID</th>
+                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Task Description</th>
+                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Leave Details (Remarks)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-purple-50">
+                                                {filtered.map((row) => (
+                                                    <tr key={row.id} className="hover:bg-purple-50/40 transition-all duration-200 group">
+                                                        <td className="px-6 py-4 whitespace-nowrap text-[11px] text-gray-500 font-mono tracking-tight">{formatTableDate(row.date)}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-xs font-bold text-gray-800 group-hover:text-purple-700 transition-colors">{row.name || '—'}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <span className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded-md text-[10px] font-bold border border-purple-100">
+                                                                {row.taskId || '—'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-xs text-gray-600 max-w-xs overflow-hidden text-ellipsis leading-relaxed">{row.description || '—'}</td>
+                                                        <td className="px-6 py-4 text-xs text-gray-700 italic border-l-4 border-transparent group-hover:border-purple-400 group-hover:bg-purple-50/50 transition-all pl-6">
+                                                            {row.remarks}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )
+                                })()}
+                            </div>
+                        </div>
+                    )
+                })()}
             </div>
 
             {/* Modals with Updated Styling */}

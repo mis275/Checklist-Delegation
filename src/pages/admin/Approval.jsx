@@ -602,11 +602,14 @@ function Approval() {
 
 
   const getTaskStatistics = () => {
-    const totalCompleted = historyData.length;
+    const data = activeApprovalTab === 'checklist' ? historyData : delegationHistoryData;
+    const filteredData = activeApprovalTab === 'checklist' ? filteredHistoryData : filteredDelegationHistoryData;
+
+    const totalCompleted = data.length;
     const memberStats =
       selectedMembers.length > 0
         ? selectedMembers.reduce((stats, member) => {
-          const memberTasks = historyData.filter(
+          const memberTasks = data.filter(
             (task) => task["col4"] === member
           ).length;
           return {
@@ -615,7 +618,7 @@ function Approval() {
           };
         }, {})
         : {};
-    const filteredTotal = filteredHistoryData.length;
+    const filteredTotal = filteredData.length;
     return {
       totalCompleted,
       memberStats,
@@ -734,10 +737,8 @@ function Approval() {
 
           const columnGValue = rowValues[6]; // Task End Date
           const columnKValue = rowValues[10]; // Actual Date
-          const columnMValue = rowValues[12]; // Status (DONE)
-          const columnPValue = sheetType === 'checklist' ? rowValues[15] : rowValues[19]; // Admin Done column
-
-          if (columnMValue && columnMValue.toString().trim() === "DONE") {
+          const statusValue = sheetType === 'checklist' ? rowValues[12] : rowValues[13];
+          if (statusValue && statusValue.toString().trim() === "DONE") {
             return;
           }
 
@@ -789,10 +790,10 @@ function Approval() {
             { id: "col9", label: "Require Attachment", type: "string" },
             { id: "col10", label: "Actual", type: "datetime" },
             { id: "col11", label: "Column L", type: "string" },
+            { id: "col11_m", label: "Column M", type: "string" },
             { id: "col12", label: "Status", type: "string" },
             { id: "col13", label: "Remarks", type: "string" },
-            { id: "col14", label: "Uploaded Image", type: "string" },
-            { id: "col15", label: "Column P", type: "string" },
+            { id: "col15", label: "Uploaded Image", type: "string" },
             { id: "col16", label: "Column Q", type: "string" },
             { id: "col17", label: "Column R", type: "string" },
             { id: "col18", label: "Column S", type: "string" },
@@ -919,7 +920,7 @@ function Approval() {
           <div className="rounded-lg border border-purple-200 shadow-md bg-white overflow-hidden">
             <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100 p-4">
               <h2 className="text-purple-700 font-medium">
-                {`Completed ${CONFIG.SHEET_NAME} Tasks`}
+                {`Completed ${activeApprovalTab === 'checklist' ? CONFIG.SHEET_NAME : 'Delegation'} Tasks`}
               </h2>
               <p className="text-purple-600 text-sm">
                 {`${CONFIG.PAGE_CONFIG.historyDescription} for ${isAdmin ? "all" : "your"
@@ -944,199 +945,123 @@ function Approval() {
               </div>
             ) : (
               <>
-                {/* History Filters */}
-                <div className="p-4 border-b border-purple-100 bg-gray-50">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
+                {/* History Filters & Stats */}
+                <div className="p-3 border-b border-purple-100 bg-gray-50 flex flex-wrap items-end gap-x-6 gap-y-4">
+                  {getFilteredMembersList().length > 0 && isAdmin && (
+                    <div className="flex flex-col relative w-[200px] sm:w-[240px]">
+                      <label className="text-xs font-semibold text-gray-600 mb-1">Filter by Member</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search members..."
+                          value={memberSearchTerm}
+                          onChange={(e) => setMemberSearchTerm(e.target.value)}
+                          onFocus={() => setShowMemberDropdown(true)}
+                          className="w-full px-3 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm pr-8 cursor-text"
+                        />
+                        <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+                      </div>
 
-
-                    {getFilteredMembersList().length > 0 && isAdmin && (
-                      <div className="flex flex-col">
-                        <div className="mb-2 flex items-center">
-                          <span className="text-sm font-medium text-purple-700">
-                            Filter by Member:
-                          </span>
-                        </div>
-                        <div className="relative min-w-[250px]">
-                          <div className="relative">
-                            <input
-                              type="text"
-                              placeholder="Search members..."
-                              value={memberSearchTerm}
-                              onChange={(e) =>
-                                setMemberSearchTerm(e.target.value)
-                              }
-                              onFocus={() => setShowMemberDropdown(true)}
-                              className="w-full p-2 pr-8 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            />
-                            <Search
-                              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400"
-                              size={18}
-                            />
-                          </div>
-
-                          {showMemberDropdown && (
-                            <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                              {getFilteredMembersList()
-                                .filter((member) =>
-                                  member
-                                    .toLowerCase()
-                                    .includes(memberSearchTerm.toLowerCase())
-                                )
-                                .map((member, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="flex items-center px-3 py-2 hover:bg-purple-50 cursor-pointer"
-                                    onClick={() => handleMemberSelection(member)}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedMembers.includes(member)}
-                                      onChange={() => { }}
-                                      className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
-                                    />
-                                    <label className="ml-2 text-sm text-gray-700 cursor-pointer flex-1">
-                                      {member}
-                                    </label>
-                                  </div>
-                                ))}
-                              {getFilteredMembersList().filter((member) =>
-                                member
-                                  .toLowerCase()
-                                  .includes(memberSearchTerm.toLowerCase())
-                              ).length === 0 && (
-                                  <div className="px-3 py-2 text-sm text-gray-500">
-                                    No members found
-                                  </div>
-                                )}
-                            </div>
-                          )}
-
-                          {selectedMembers.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {selectedMembers.map((member, idx) => (
-                                <span
-                                  key={idx}
-                                  className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-700 rounded-md text-xs"
-                                >
+                      {showMemberDropdown && (
+                        <div className="absolute z-50 top-full mt-1 w-full sm:w-[320px] bg-white border border-gray-200 rounded shadow-lg max-h-60 overflow-y-auto">
+                          {getFilteredMembersList()
+                            .filter((member) => member.toLowerCase().includes(memberSearchTerm.toLowerCase()))
+                            .map((member, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center px-2 py-1.5 hover:bg-gray-50 cursor-pointer rounded"
+                                onClick={() => handleMemberSelection(member)}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedMembers.includes(member)}
+                                  onChange={() => { }}
+                                  className="h-3.5 w-3.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 pointer-events-none"
+                                />
+                                <label className="ml-2 text-sm text-gray-700 cursor-pointer flex-1 truncate">
                                   {member}
-                                  <button
-                                    onClick={() => handleMemberSelection(member)}
-                                    className="ml-1 text-purple-600 hover:text-purple-800"
-                                  >
-                                    <X size={14} />
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
+                                </label>
+                              </div>
+                            ))}
+                          {getFilteredMembersList().filter((member) => member.toLowerCase().includes(memberSearchTerm.toLowerCase())).length === 0 && (
+                            <div className="px-3 py-2 text-sm text-gray-500">No members found</div>
                           )}
                         </div>
-                      </div>
-                    )}
-                    <div className="flex flex-col">
-                      <div className="mb-2 flex items-center">
-                        <span className="text-sm font-medium text-purple-700">
-                          Filter by Date Range:
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center">
-                          <label
-                            htmlFor="start-date"
-                            className="text-sm text-gray-700 mr-1"
-                          >
-                            From
-                          </label>
-                          <input
-                            id="start-date"
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="text-sm border border-gray-200 rounded-md p-1"
-                          />
-                        </div>
-                        <div className="flex items-center">
-                          <label
-                            htmlFor="end-date"
-                            className="text-sm text-gray-700 mr-1"
-                          >
-                            To
-                          </label>
-                          <input
-                            id="end-date"
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="text-sm border border-gray-200 rounded-md p-1"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    {(selectedMembers.length > 0 ||
-                      startDate ||
-                      endDate ||
-                      searchTerm) && (
-                        <button
-                          onClick={resetFilters}
-                          className="px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm"
-                        >
-                          Clear All Filters
-                        </button>
                       )}
-                  </div>
-                </div>
 
-                {/* NEW: Confirmation Modal */}
-                <ConfirmationModal
-                  isOpen={confirmationModal.isOpen}
-                  itemCount={confirmationModal.itemCount}
-                  onConfirm={confirmMarkDone}
-                  onCancel={() =>
-                    setConfirmationModal({ isOpen: false, itemCount: 0 })
-                  }
-                />
-
-                {/* Task Statistics */}
-                <div className="p-4 border-b border-purple-100 bg-blue-50">
-                  <div className="flex flex-col">
-                    <h3 className="text-sm font-medium text-blue-700 mb-2">
-                      Task Completion Statistics:
-                    </h3>
-                    <div className="flex flex-wrap gap-4">
-                      <div className="px-3 py-2 bg-white rounded-md shadow-sm">
-                        <span className="text-xs text-gray-500">
-                          Total Completed
-                        </span>
-                        <div className="text-lg font-semibold text-blue-600">
-                          {getTaskStatistics().totalCompleted}
-                        </div>
-                      </div>
-                      {(selectedMembers.length > 0 ||
-                        startDate ||
-                        endDate ||
-                        searchTerm) && (
-                          <div className="px-3 py-2 bg-white rounded-md shadow-sm">
-                            <span className="text-xs text-gray-500">
-                              Filtered Results
+                      {/* Selected members small badges */}
+                      {selectedMembers.length > 0 && (
+                        <div className="absolute top-[105%] left-0 w-full mt-1 flex flex-wrap gap-1 z-40">
+                          {selectedMembers.map((member, idx) => (
+                            <span key={idx} className="inline-flex items-center px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 rounded text-[10px]">
+                              <span className="truncate max-w-[80px]">{member}</span>
+                              <button onClick={() => handleMemberSelection(member)} className="ml-1 text-purple-600 hover:text-purple-800">
+                                <X size={12} />
+                              </button>
                             </span>
-                            <div className="text-lg font-semibold text-blue-600">
-                              {getTaskStatistics().filteredTotal}
-                            </div>
-                          </div>
-                        )}
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col">
+                    <label className="text-xs font-semibold text-gray-600 mb-1">Date Range</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="start-date"
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="px-2 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm cursor-pointer"
+                      />
+                      <span className="text-gray-400 text-sm">to</span>
+                      <input
+                        id="end-date"
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="px-2 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Inline Statistics */}
+                  <div className="flex flex-col">
+                    <label className="text-xs font-semibold text-gray-600 mb-1">Task Statistics</label>
+                    <div className="flex items-center gap-2 h-[34px]">
+                      <div className="px-3 py-1 bg-white text-indigo-700 border border-indigo-200 rounded shadow-sm text-sm whitespace-nowrap flex items-center h-full">
+                        Total: <span className="font-bold ml-1">{getTaskStatistics().totalCompleted}</span>
+                      </div>
+                      {(selectedMembers.length > 0 || startDate || endDate || searchTerm) && (
+                        <div className="px-3 py-1 bg-white text-purple-700 border border-purple-200 rounded shadow-sm text-sm whitespace-nowrap flex items-center h-full">
+                          Filtered: <span className="font-bold ml-1">{getTaskStatistics().filteredTotal}</span>
+                        </div>
+                      )}
                       {selectedMembers.map((member) => (
-                        <div
-                          key={member}
-                          className="px-3 py-2 bg-white rounded-md shadow-sm"
-                        >
-                          <span className="text-xs text-gray-500">{member}</span>
-                          <div className="text-lg font-semibold text-indigo-600">
-                            {getTaskStatistics().memberStats[member]}
-                          </div>
+                        <div key={member} className="px-3 py-1 bg-white text-gray-700 border border-gray-200 rounded shadow-sm text-sm whitespace-nowrap flex items-center h-full">
+                          <span className="truncate max-w-[100px] mr-1" title={member}>{member}:</span> <span className="font-bold">{getTaskStatistics().memberStats[member]}</span>
                         </div>
                       ))}
                     </div>
                   </div>
+
+                  {(selectedMembers.length > 0 || startDate || endDate || searchTerm) && (
+                    <button
+                      onClick={resetFilters}
+                      className="px-3 py-1.5 h-[34px] bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 text-sm shadow-sm transition-colors ml-auto sm:ml-0"
+                    >
+                      Clear All
+                    </button>
+                  )}
                 </div>
+
+                <ConfirmationModal
+                  isOpen={confirmationModal.isOpen}
+                  itemCount={confirmationModal.itemCount}
+                  onConfirm={confirmMarkDone}
+                  onCancel={() => setConfirmationModal({ isOpen: false, itemCount: 0 })}
+                />
 
                 {/* History Table - Based on Active Tab */}
                 <div className="hidden sm:block h-[calc(100vh-300px)] overflow-auto">

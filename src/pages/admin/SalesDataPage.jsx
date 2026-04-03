@@ -49,11 +49,24 @@ function AccountDataPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [membersList, setMembersList] = useState([]);
   const [selectedMembers, setSelectedMembers] = useState([]);
+  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
+  const memberDropdownRef = useRef(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   // UPDATED: Always set to 'super_admin' for unrestricted access
   const [userRole, setUserRole] = useState("super_admin");
   const [username, setUsername] = useState("");
+
+  // Click outside handler for member dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (memberDropdownRef.current && !memberDropdownRef.current.contains(event.target)) {
+        setIsMemberDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // NEW: Admin history selection states
   const [selectedHistoryItems, setSelectedHistoryItems] = useState([]);
@@ -78,7 +91,29 @@ function AccountDataPage() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [isCameraLoading, setIsCameraLoading] = useState(false); // ✅ Ye line check karo
-  // Add these functions in your component (around line 150-250, after other functions)
+  
+  // Pagination for History Tab optimization
+  const [visibleHistoryItems, setVisibleHistoryItems] = useState(50);
+  const scrollContainerRef = useRef(null);
+  const ITEMS_PER_PAGE = 50;
+
+  // Reset pagination when filters or view changes
+  useEffect(() => {
+    setVisibleHistoryItems(ITEMS_PER_PAGE);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [searchTerm, selectedMembers, startDate, endDate, showHistory]);
+
+  const handleScroll = (e) => {
+    if (!showHistory) return;
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop <= clientHeight + 100) {
+      if (visibleHistoryItems < filteredHistoryData.length) {
+        setVisibleHistoryItems(prev => prev + ITEMS_PER_PAGE);
+      }
+    }
+  };
 
 
 
@@ -798,7 +833,7 @@ function AccountDataPage() {
       });
   }, [historyData, searchTerm, selectedMembers, startDate, endDate]);
 
-  const getTaskStatistics = () => {
+  const taskStatistics = useMemo(() => {
     const totalCompleted = historyData.length;
     const memberStats =
       selectedMembers.length > 0
@@ -818,7 +853,7 @@ function AccountDataPage() {
       memberStats,
       filteredTotal,
     };
-  };
+  }, [historyData, filteredHistoryData.length, selectedMembers]);
 
   const handleMemberSelection = (member) => {
     setSelectedMembers((prev) => {
@@ -830,7 +865,7 @@ function AccountDataPage() {
     });
   };
 
-  const getFilteredMembersList = () => {
+  const filteredMembersList = useMemo(() => {
     if (isAdmin) {
       return membersList;
     } else {
@@ -838,7 +873,7 @@ function AccountDataPage() {
         (member) => member.toLowerCase() === username.toLowerCase()
       );
     }
-  };
+  }, [isAdmin, membersList, username]);
 
   // UPDATED: fetchSheetData - Show only data where Column K is null
   const fetchSheetData = useCallback(async () => {
@@ -970,12 +1005,14 @@ function AccountDataPage() {
 
         // ✅ ONLY ADD IF COLUMN K IS EMPTY/NULL
         const isColumnKEmpty = isEmpty(columnKValue);
+        const hasColumnG = !isEmpty(columnGValue);
+        const isStatusDone = String(rowValues[12] || '').trim().toUpperCase() === 'DONE';
 
         if (isColumnKEmpty && isEmpty(columnPValue)) {
           pendingAccounts.push(rowData);
         }
-        // For history view, include tasks where Column K is NOT empty
-        else if (!isColumnKEmpty) {
+        // For history view, according to user's requirement (same as Approval.jsx)
+        else if (hasColumnG && !isColumnKEmpty && !isStatusDone) {
           const isUserHistoryMatch =
             currentUserRole === "admin" ||
             currentUserRole === "superadmin" ||
@@ -1325,23 +1362,17 @@ function AccountDataPage() {
               </div>
             )}
 
-            {/* Toggle history button */}
-            {/* <button
-              onClick={toggleHistory}
-              className="rounded-md bg-gradient-to-r from-blue-500 to-indigo-600 py-2 px-4 text-white hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-full sm:w-auto text-center"
+            {/* HISTORY TOGGLE BUTTON (Custom Styling from Image) */}
+            <button
+              onClick={() => {
+                setShowHistory(!showHistory);
+                resetFilters();
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-white font-medium transition-all shadow-md active:scale-95 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700"
             >
-              {showHistory ? (
-                <div className="flex items-center justify-center sm:justify-start">
-                  <ArrowLeft className="h-4 w-4 mr-1" />
-                  <span>Back to Tasks</span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center sm:justify-start">
-                  <History className="h-4 w-4 mr-1" />
-                  <span>View History</span>
-                </div>
-              )}
-            </button> */}
+              <History className="h-4 w-4" />
+              {showHistory ? "View Active" : "View History"}
+            </button>
 
             {/* Submit button (only when not history view) */}
             {!showHistory && (
@@ -1359,22 +1390,7 @@ function AccountDataPage() {
               </button>
             )}
 
-            {/* Admin Submit Button for History View */}
-            {showHistory &&
-              ['admin', 'superadmin', 'super admin', 'superuser'].includes(userRole) &&
-              selectedHistoryItems.length > 0 && (
-                <div className="fixed bottom-6 right-6 sm:top-40 sm:right-10 z-50">
-                  <button
-                    onClick={handleMarkMultipleDone}
-                    disabled={markingAsDone}
-                    className="rounded-md bg-green-600 text-white px-4 py-2 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-                  >
-                    {markingAsDone
-                      ? "Processing..."
-                      : `Mark ${selectedHistoryItems.length} Items as Admin Done`}
-                  </button>
-                </div>
-              )}
+            {/* Bulk Actions for History View Removed per User Request (Read-Only) */}
           </div>
         </div>
 
@@ -1409,9 +1425,11 @@ function AccountDataPage() {
               </p>
             </div>
 
-            <h1 className="sm:text-xl tracking-tight text-purple-700 text-center sm:text-left">
-              Pending Tasks: {filteredAccountData.length}
-            </h1>
+            {!showHistory && (
+              <h1 className="sm:text-xl tracking-tight text-purple-700 text-center sm:text-left">
+                Pending Tasks: {filteredAccountData.length}
+              </h1>
+            )}
           </div>
 
           {loading ? (
@@ -1431,91 +1449,104 @@ function AccountDataPage() {
             </div>
           ) : showHistory ? (
             <>
-              {/* History Filters */}
-              <div className="p-4 border-b border-purple-100 bg-gray-50">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  {getFilteredMembersList().length > 0 && (
-                    <div className="flex flex-col">
-                      <div className="mb-2 flex items-center">
-                        <span className="text-sm font-medium text-purple-700">
-                          Filter by Member:
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-3 max-h-32 overflow-y-auto p-2 border border-gray-200 rounded-md bg-white">
-                        {getFilteredMembersList().map((member, idx) => (
-                          <div key={idx} className="flex items-center">
-                            <input
-                              id={`member-${idx}`}
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                              checked={selectedMembers.includes(member)}
-                              onChange={() => handleMemberSelection(member)}
-                            />
-                            <label
-                              htmlFor={`member-${idx}`}
-                              className="ml-2 text-sm text-gray-700"
-                            >
-                              {member}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex flex-col">
-                    <div className="mb-2 flex items-center">
-                      <span className="text-sm font-medium text-purple-700">
-                        Filter by Date Range:
+              {/* History Filters & Stats */}
+              <div className="p-3 border-b border-purple-100 bg-gray-50 flex flex-wrap items-end gap-x-6 gap-y-4">
+                
+                {/* Member Dropdown */}
+                {filteredMembersList.length > 0 && (
+                  <div className="flex flex-col relative w-[200px] sm:w-[240px]" ref={memberDropdownRef}>
+                    <label className="text-xs font-semibold text-gray-600 mb-1">Filter by Member</label>
+                    <button
+                      className="flex items-center justify-between w-full px-3 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm"
+                      onClick={() => setIsMemberDropdownOpen(!isMemberDropdownOpen)}
+                    >
+                      <span className="truncate">
+                        {selectedMembers.length === 0
+                          ? "Select Members..."
+                          : `${selectedMembers.length} selected`}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center">
-                        <label
-                          htmlFor="start-date"
-                          className="text-sm text-gray-700 mr-1"
-                        >
-                          From
-                        </label>
-                        <input
-                          id="start-date"
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          className="text-sm border border-gray-200 rounded-md p-1"
-                        />
+                      <svg className={`w-4 h-4 text-gray-400 transition-transform ${isMemberDropdownOpen ? "transform rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {isMemberDropdownOpen && (
+                      <div className="absolute z-50 top-full mt-1 w-[260px] sm:w-[320px] bg-white border border-gray-200 rounded shadow-lg max-h-60 overflow-y-auto">
+                        <div className="p-2 grid grid-cols-1 gap-1">
+                          {filteredMembersList.map((member, idx) => (
+                            <div key={idx} className="flex items-center hover:bg-gray-50 p-1.5 rounded">
+                              <input
+                                id={`member-${idx}`}
+                                type="checkbox"
+                                className="h-3.5 w-3.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                checked={selectedMembers.includes(member)}
+                                onChange={() => handleMemberSelection(member)}
+                              />
+                              <label htmlFor={`member-${idx}`} className="ml-2 text-sm text-gray-700 cursor-pointer flex-1 truncate" title={member}>
+                                {member}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex items-center">
-                        <label
-                          htmlFor="end-date"
-                          className="text-sm text-gray-700 mr-1"
-                        >
-                          To
-                        </label>
-                        <input
-                          id="end-date"
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          className="text-sm border border-gray-200 rounded-md p-1"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  {(selectedMembers.length > 0 ||
-                    startDate ||
-                    endDate ||
-                    searchTerm) && (
-                      <button
-                        onClick={resetFilters}
-                        className="px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm"
-                      >
-                        Clear All Filters
-                      </button>
                     )}
+                  </div>
+                )}
+
+                {/* Date Range Filters */}
+                <div className="flex flex-col">
+                  <label className="text-xs font-semibold text-gray-600 mb-1">Date Range</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="start-date"
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="px-2 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm cursor-pointer"
+                    />
+                    <span className="text-gray-400 text-sm">to</span>
+                    <input
+                      id="end-date"
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="px-2 py-1.5 text-sm bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm cursor-pointer"
+                    />
+                  </div>
                 </div>
+
+                {/* Inline Statistics */}
+                <div className="flex flex-col">
+                  <label className="text-xs font-semibold text-gray-600 mb-1">Task Statistics</label>
+                  <div className="flex items-center gap-2 h-[34px]">
+                    <div className="px-3 py-1 bg-white text-indigo-700 border border-indigo-200 rounded shadow-sm text-sm whitespace-nowrap flex items-center h-full">
+                      Total: <span className="font-bold ml-1">{taskStatistics.totalCompleted}</span>
+                    </div>
+                    {(selectedMembers.length > 0 || startDate || endDate || searchTerm) && (
+                      <div className="px-3 py-1 bg-white text-purple-700 border border-purple-200 rounded shadow-sm text-sm whitespace-nowrap flex items-center h-full">
+                        Filtered: <span className="font-bold ml-1">{taskStatistics.filteredTotal}</span>
+                      </div>
+                    )}
+                    {selectedMembers.map((member) => (
+                      <div key={member} className="px-3 py-1 bg-white text-gray-700 border border-gray-200 rounded shadow-sm text-sm whitespace-nowrap flex items-center h-full">
+                        <span className="truncate max-w-[100px] mr-1" title={member}>{member}:</span> <span className="font-bold">{taskStatistics.memberStats[member]}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Clear Filters Button */}
+                {(selectedMembers.length > 0 || startDate || endDate || searchTerm) && (
+                  <button
+                    onClick={resetFilters}
+                    className="px-3 py-1.5 h-[34px] bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 text-sm shadow-sm transition-colors ml-auto sm:ml-0"
+                  >
+                    Clear All
+                  </button>
+                )}
+                
               </div>
 
-              {/* NEW: Confirmation Modal */}
               <ConfirmationModal
                 isOpen={confirmationModal.isOpen}
                 itemCount={confirmationModal.itemCount}
@@ -1525,520 +1556,102 @@ function AccountDataPage() {
                 }
               />
 
-              {/* Task Statistics */}
-              <div className="p-4 border-b border-purple-100 bg-blue-50">
-                <div className="flex flex-col">
-                  <h3 className="text-sm font-medium text-blue-700 mb-2">
-                    Task Completion Statistics:
-                  </h3>
-                  <div className="flex flex-wrap gap-4">
-                    <div className="px-3 py-2 bg-white rounded-md shadow-sm">
-                      <span className="text-xs text-gray-500">
-                        Total Completed
-                      </span>
-                      <div className="text-lg font-semibold text-blue-600">
-                        {getTaskStatistics().totalCompleted}
-                      </div>
-                    </div>
-                    {(selectedMembers.length > 0 ||
-                      startDate ||
-                      endDate ||
-                      searchTerm) && (
-                        <div className="px-3 py-2 bg-white rounded-md shadow-sm">
-                          <span className="text-xs text-gray-500">
-                            Filtered Results
-                          </span>
-                          <div className="text-lg font-semibold text-blue-600">
-                            {getTaskStatistics().filteredTotal}
-                          </div>
-                        </div>
-                      )}
-                    {selectedMembers.map((member) => (
-                      <div
-                        key={member}
-                        className="px-3 py-2 bg-white rounded-md shadow-sm"
-                      >
-                        <span className="text-xs text-gray-500">{member}</span>
-                        <div className="text-lg font-semibold text-indigo-600">
-                          {getTaskStatistics().memberStats[member]}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* History Table - Optimized for performance */}
-              <div className="h-[calc(100vh-300px)] overflow-auto">
+              {/* History Table Container with Scroll Listener */}
+              <div 
+                ref={scrollContainerRef}
+                onScroll={handleScroll}
+                className="h-[calc(100vh-300px)] overflow-auto scrollbar-thin scrollbar-thumb-purple-200"
+              >
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0 z-10">
+                  <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
                     <tr>
-                      {/* NEW: Admin Done Column - NOW FIRST */}
-                      {isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 min-w-[160px]">
-                          Admin Done
-                        </th>
-                      )}
+                      {/* History Columns (Strictly Read-Only) */}
 
-                      {/* Admin Select Column Header */}
-                      {isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
-                          <div className="flex flex-col items-center">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                              checked={
-                                filteredHistoryData.filter(
-                                  (item) =>
-                                    isEmpty(item["col15"]) ||
-                                    (item["col15"].toString().trim() !==
-                                      "Done" &&
-                                      item["col15"].toString().trim() !==
-                                      "Not Done")
-                                ).length > 0 &&
-                                selectedHistoryItems.length ===
-                                filteredHistoryData.filter(
-                                  (item) =>
-                                    isEmpty(item["col15"]) ||
-                                    (item["col15"].toString().trim() !==
-                                      "Done" &&
-                                      item["col15"].toString().trim() !==
-                                      "Not Done")
-                                ).length
-                              }
-                              onChange={(e) => {
-                                const unprocessedItems =
-                                  filteredHistoryData.filter(
-                                    (item) =>
-                                      isEmpty(item["col15"]) ||
-                                      (item["col15"].toString().trim() !==
-                                        "Done" &&
-                                        item["col15"].toString().trim() !==
-                                        "Not Done")
-                                  );
-                                if (e.target.checked) {
-                                  setSelectedHistoryItems(unprocessedItems);
-                                } else {
-                                  setSelectedHistoryItems([]);
-                                }
-                              }}
-                            />
-                            <span className="text-xs text-gray-400 mt-1">
-                              Admin
-                            </span>
-                          </div>
-                        </th>
-                      )}
-
-                      {/* Hide Task ID column for admin in history view */}
-                      {!isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Task ID
-                        </th>
-                      )}
-
-                      {/* Hide Department Name column for admin in history view */}
-                      {!isAdmin && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                          Department Name
-                        </th>
-                      )}
-
-                      {/* Hide Given By column for admin in history view */}
-                      {!isAdmin && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Given By
-                        </th>
-                      )}
-
-                      {/* Hide Name column for admin in history view */}
-                      {!isAdmin && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                          Name
-                        </th>
-                      )}
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">
-                        Task Description
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-50 min-w-[140px]">
-                        Task Start Date & Time
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">
-                        Freq
-                      </th>
-                      {/* Hide Enable Reminders column for admin in history view */}
-                      {!isAdmin && isAdmin && (
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                          Enable Reminders
-                        </th>
-                      )}
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">
-                        Require Attachment
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50 min-w-[140px]">
-                        Actual Date & Time
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-blue-50 min-w-[80px]">
-                        Status
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-purple-50 min-w-[150px]">
-                        Remarks
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">
-                        Attachment
-                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Timestamp</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Task ID</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Firm</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Given By</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Name</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">Task Description</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-50 min-w-[140px]">End Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">Freq</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Reminders</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Attachment</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-50 min-w-[140px]">Actual Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-blue-50 min-w-[100px]">Status</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-purple-50 min-w-[200px]">Remarks</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Image</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredHistoryData.length > 0 ? (
-                      filteredHistoryData.map((history) => {
+                      filteredHistoryData.slice(0, visibleHistoryItems).map((history) => {
                         const isInEditMode = editingRows.has(history._id);
                         const isSaving = savingEdits.has(history._id);
 
                         return (
                           <tr key={history._id} className="hover:bg-gray-50">
-                            {/* FIRST: Admin Done Column with Edit functionality */}
-                            {isAdmin && (
-                              <td className="px-3 py-4 bg-gray-50 min-w-[160px]">
-                                {isInEditMode ? (
-                                  // Edit mode
-                                  <div className="flex items-center space-x-2">
-                                    <select
-                                      value={
-                                        editedAdminStatus[history._id] ||
-                                        "Not Done"
-                                      }
-                                      onChange={(e) =>
-                                        setEditedAdminStatus((prev) => ({
-                                          ...prev,
-                                          [history._id]: e.target.value,
-                                        }))
-                                      }
-                                      className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                      disabled={isSaving}
-                                    >
-                                      <option value="Not Done">Not Done</option>
-                                      <option value="Done">Done</option>
-                                    </select>
-                                    <div className="flex space-x-1">
-                                      <button
-                                        onClick={() => handleSaveEdit(history)}
-                                        disabled={isSaving}
-                                        className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
-                                        title="Save changes"
-                                      >
-                                        {isSaving ? (
-                                          <div className="animate-spin h-4 w-4 border-2 border-green-600 border-t-transparent rounded-full"></div>
-                                        ) : (
-                                          <Save className="h-4 w-4" />
-                                        )}
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          handleCancelEdit(history._id)
-                                        }
-                                        disabled={isSaving}
-                                        className="p-1 text-red-600 hover:text-red-800 disabled:opacity-50"
-                                        title="Cancel editing"
-                                      >
-                                        <XCircle className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  // Display mode
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      {!isEmpty(history["col15"]) &&
-                                        history["col15"].toString().trim() ===
-                                        "Done" ? (
-                                        <div className="flex items-center">
-                                          <div className="h-4 w-4 rounded border-gray-300 text-green-600 bg-green-100 mr-2 flex items-center justify-center">
-                                            <span className="text-xs text-green-600">
-                                              ✓
-                                            </span>
-                                          </div>
-                                          <div className="flex flex-col">
-                                            <div className="font-medium text-green-700 text-sm">
-                                              Done
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ) : !isEmpty(history["col15"]) &&
-                                        history["col15"].toString().trim() ===
-                                        "Not Done" ? (
-                                        <div className="flex items-center text-red-500 text-sm">
-                                          <div className="h-4 w-4 rounded border-gray-300 bg-red-100 mr-2 flex items-center justify-center">
-                                            <span className="text-xs text-red-600">
-                                              ✗
-                                            </span>
-                                          </div>
-                                          <span className="font-medium">
-                                            Not Done
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center text-gray-400 text-sm">
-                                          <div className="h-4 w-4 rounded border-gray-300 mr-2"></div>
-                                          <span>Pending</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                    <button
-                                      onClick={() => handleEditClick(history)}
-                                      className="p-1 text-blue-600 hover:text-blue-800 ml-2"
-                                      title="Edit admin status"
-                                    >
-                                      <Edit className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                )}
-                              </td>
-                            )}
+                            {/* History Data (Strictly Read-Only) */}
 
-                            {/* SECOND: Admin Select Checkbox - Hide for Done and Not Done items */}
-                            {isAdmin && (
-                              <td className="px-3 py-4 w-12">
-                                {!isEmpty(history["col15"]) &&
-                                  (history["col15"].toString().trim() ===
-                                    "Done" ||
-                                    history["col15"].toString().trim() ===
-                                    "Not Done") ? (
-                                  // Already processed - show status only
-                                  <div className="flex flex-col items-center">
-                                    <div
-                                      className={`h-4 w-4 rounded border-gray-300 ${history["col15"].toString().trim() ===
-                                        "Done"
-                                        ? "text-green-600 bg-green-100"
-                                        : "text-red-600 bg-red-100"
-                                        }`}
-                                    >
-                                      <span
-                                        className={`text-xs ${history["col15"].toString().trim() ===
-                                          "Done"
-                                          ? "text-green-600"
-                                          : "text-red-600"
-                                          }`}
-                                      >
-                                        {history["col15"].toString().trim() ===
-                                          "Done"
-                                          ? "✓"
-                                          : "✗"}
-                                      </span>
-                                    </div>
-                                    <span
-                                      className={`text-xs mt-1 text-center break-words ${history["col15"].toString().trim() ===
-                                        "Done"
-                                        ? "text-green-600"
-                                        : "text-red-600"
-                                        }`}
-                                    >
-                                      {history["col15"].toString().trim()}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  // Not processed yet - normal selectable checkbox
-                                  <div className="flex flex-col items-center">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                                      checked={selectedHistoryItems.some(
-                                        (item) => item._id === history._id
-                                      )}
-                                      onChange={() => {
-                                        setSelectedHistoryItems((prev) =>
-                                          prev.some(
-                                            (item) => item._id === history._id
-                                          )
-                                            ? prev.filter(
-                                              (item) =>
-                                                item._id !== history._id
-                                            )
-                                            : [...prev, history]
-                                        );
-                                      }}
-                                    />
-                                    <span className="text-xs text-gray-400 mt-1 text-center break-words">
-                                      Mark Done
-                                    </span>
-                                  </div>
-                                )}
-                              </td>
-                            )}
-
-                            {/* Rest of the columns remain the same order */}
-                            {/* Hide Task ID column for admin in history view */}
-                            {!isAdmin && (
-                              <td className="px-3 py-4 min-w-[100px]">
-                                <div className="text-sm font-medium text-gray-900 break-words">
-                                  {history["col1"] || "—"}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Hide Department Name column for admin in history view */}
-                            {!isAdmin && isAdmin && (
-                              <td className="px-3 py-4 min-w-[120px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col2"] || "—"}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Hide Given By column for admin in history view */}
-                            {!isAdmin && isAdmin && (
-                              <td className="px-3 py-4 min-w-[100px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col3"] || "—"}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Hide Name column for admin in history view */}
-                            {!isAdmin && isAdmin && (
-                              <td className="px-3 py-4 min-w-[100px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col4"] || "—"}
-                                </div>
-                              </td>
-                            )}
-                            <td className="px-3 py-4 min-w-[200px]">
-                              <div
-                                className="text-sm text-gray-900 break-words"
-                                title={history["col5"]}
-                              >
-                                {history["col5"] || "—"}
-                              </div>
+                            {/* Checklist Data Cells */}
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col0 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs font-medium text-gray-900">{history.col1 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col2 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col3 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col4 || "—"}</td>
+                            <td className="px-3 py-4 text-xs text-gray-500 min-w-[300px] max-w-[400px]">
+                              <div className="whitespace-normal break-words">{history.col5 || "—"}</div>
                             </td>
-                            <td className="px-3 py-4 bg-yellow-50 min-w-[140px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col6"] ? (
-                                  <div>
-                                    <div className="font-medium break-words">
-                                      {history["col6"].includes(" ")
-                                        ? history["col6"].split(" ")[0]
-                                        : history["col6"]}
-                                    </div>
-                                    {history["col6"].includes(" ") && (
-                                      <div className="text-xs text-gray-500 break-words">
-                                        {history["col6"].split(" ")[1]}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  "—"
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 min-w-[80px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col7"] || "—"}
-                              </div>
-                            </td>
-                            {/* Hide Enable Reminders column for admin in history view */}
-                            {!isAdmin && isAdmin && (
-                              <td className="px-3 py-4 min-w-[120px]">
-                                <div className="text-sm text-gray-900 break-words">
-                                  {history["col8"] || "—"}
-                                </div>
-                              </td>
-                            )}
-                            <td className="px-3 py-4 min-w-[120px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col9"] || "—"}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 bg-green-50 min-w-[140px]">
-                              <div className="text-sm text-gray-900 break-words">
-                                {history["col10"] ? (
-                                  <div>
-                                    <div className="font-medium break-words">
-                                      {history["col10"].includes(" ")
-                                        ? history["col10"].split(" ")[0]
-                                        : history["col10"]}
-                                    </div>
-                                    {history["col10"].includes(" ") && (
-                                      <div className="text-xs text-gray-500 break-words">
-                                        {history["col10"].split(" ")[1]}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  "—"
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-3 py-4 bg-blue-50 min-w-[80px]">
-                              <span
-                                className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full break-words ${history["col12"] === "Yes"
-                                  ? "bg-green-100 text-green-800"
-                                  : history["col12"] === "No"
-                                    ? "bg-red-100 text-red-800"
-                                    : "bg-gray-100 text-gray-800"
-                                  }`}
-                              >
-                                {history["col12"] || "—"}
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col6 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col7 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500 text-center">{history.col8 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500 text-center">{history.col9 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">{history.col10 || "—"}</td>
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${history.col12 === "Yes" ? "bg-green-100 text-green-800" : history.col12 === "No" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
+                                {history.col12 || "—"}
                               </span>
                             </td>
-                            <td className="px-3 py-4 bg-purple-50 min-w-[150px]">
-                              <div
-                                className="text-sm text-gray-900 break-words"
-                                title={history["col13"]}
-                              >
-                                {history["col13"] || "—"}
-                              </div>
+                            <td className="px-3 py-4 text-xs text-gray-500 max-w-[200px]">
+                              <div className="whitespace-normal break-words">{history.col13 || "—"}</div>
                             </td>
-                            <td className="px-3 py-4 min-w-[100px]">
-                              {history["col14"] ? (
-                                <a
-                                  href={history["col14"]}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 underline flex items-center break-words"
-                                >
-                                  <img
-                                    src={
-                                      history["col14"] ||
-                                      "/placeholder.svg?height=32&width=32"
-                                    }
-                                    alt="Attachment"
-                                    className="h-8 w-8 object-cover rounded-md mr-2 flex-shrink-0"
-                                  />
-                                  <span className="break-words">View</span>
-                                </a>
-                              ) : (
-                                <span className="text-gray-400">
-                                  No attachment
-                                </span>
-                              )}
+                            <td className="px-3 py-4 whitespace-nowrap text-xs text-gray-500 text-center">
+                              {history.col14 ? (
+                                <a href={history.col14} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">View</a>
+                              ) : "—"}
                             </td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        {/* Update colspan calculation based on hidden columns and new order */}
                         <td
-                          colSpan={
-                            (isAdmin ? 2 : 0) + // Admin Done + Admin checkbox columns
-                            (!isAdmin ? 1 : 0) + // Task ID column
-                            (!isAdmin && isAdmin ? 3 : 0) + // Department, Given By, Name columns
-                            7 + // Fixed columns
-                            (!isAdmin && isAdmin ? 1 : 0) // Enable Reminders column
-                          }
-                          className="px-6 py-4 text-center text-gray-500"
+                          colSpan={14}
+                          className="px-6 py-10 text-center text-gray-500 bg-gray-50"
                         >
-                          {searchTerm ||
-                            selectedMembers.length > 0 ||
-                            startDate ||
-                            endDate
-                            ? "No historical records matching your filters"
-                            : "No completed records found"}
+                          <div className="flex flex-col items-center justify-center">
+                            <History className="h-10 w-10 text-gray-300 mb-2" />
+                            <p className="text-lg font-medium">
+                              {selectedMembers.length > 0 || startDate || endDate || searchTerm
+                                ? "No historical records matching your filters"
+                                : "No completed records found"}
+                            </p>
+                          </div>
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
+                
+                {/* Loading indicator for pagination */}
+                {showHistory && filteredHistoryData.length > visibleHistoryItems && (
+                  <div className="py-4 text-center bg-gray-50/50 border-t border-gray-100">
+                    <div className="inline-flex items-center gap-2 text-sm text-purple-600 font-medium animate-pulse">
+                      <div className="w-1.5 h-1.5 bg-purple-600 rounded-full"></div>
+                      Scroll for more results ({visibleHistoryItems} of {filteredHistoryData.length})
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
