@@ -58,14 +58,12 @@ function Approval() {
     itemCount: 0,
   });
 
-  // NEW: Edit functionality states
   const [editingRows, setEditingRows] = useState(new Set());
   const [editedAdminStatus, setEditedAdminStatus] = useState({});
   const [editedRemarks, setEditedRemarks] = useState({});
   const [editedTaskEndDate, setEditedTaskEndDate] = useState({});
   const [bulkRemarks, setBulkRemarks] = useState("");
-  const [savingEdits, setSavingEdits] = useState(new Set());
-
+  const [savingEdits, setSavingEdits] = useState(new Set()); 
 
   const [delegationHistoryData, setDelegationHistoryData] = useState([]);
   const [activeApprovalTab, setActiveApprovalTab] = useState('checklist');
