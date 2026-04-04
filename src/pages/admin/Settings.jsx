@@ -18,8 +18,10 @@ function Settings() {
     const [error, setError] = useState(null)
     const [editingId, setEditingId] = useState(null)
     const [editedValues, setEditedValues] = useState({ doerName: '', password: '', role: '', idEmail: '', number: '' })
+    const [transferModalLoading, setTransferModalLoading] = useState(false)
     const [saving, setSaving] = useState(false)
     const [successMessage, setSuccessMessage] = useState('')
+    const [leaveNameFilter, setLeaveNameFilter] = useState('')
     const [deleting, setDeleting] = useState(null)
     const [authorized, setAuthorized] = useState(false)
     const [showAddModal, setShowAddModal] = useState(false)
@@ -555,7 +557,7 @@ function Settings() {
             fetchUserChecklistTasks(userName)
         }
     }
-
+    // Optimized Transfer Submit: Now uses Optimistic UI for instant closing and local patching
     const handleTransferSubmit = async () => {
         if (selectedChecklistTaskIds.length === 0) {
             alert("Please select at least one task to transfer.")
@@ -563,81 +565,65 @@ function Settings() {
         }
 
         try {
-            setTransferring(true)
+            // Pre-calculate data for local patch and JSON payload
+            const now = new Date()
+            const actStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+            const fmt = (s) => (s ? `${String(new Date(s).getDate()).padStart(2, '0')}/${String(new Date(s).getMonth() + 1).padStart(2, '0')}/${new Date(s).getFullYear()}` : 'N/A')
+            const remarkText = `Leave from ${fmt(transferForm.startDate)} to ${fmt(transferForm.endDate)}`
 
-            // Format a Date as DD/MM/YYYY HH:MM:SS  (e.g. "29/12/2025 13:04:34")
-            const formatDateTime = (dateStr) => {
-                if (!dateStr) return 'N/A'
-                const d = new Date(dateStr)
-                if (isNaN(d.getTime())) return 'N/A'
-                const dd = String(d.getDate()).padStart(2, '0')
-                const mm = String(d.getMonth() + 1).padStart(2, '0')
-                const yyyy = d.getFullYear()
-                const hh = String(d.getHours()).padStart(2, '0')
-                const min = String(d.getMinutes()).padStart(2, '0')
-                const ss = String(d.getSeconds()).padStart(2, '0')
-                return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`
-            }
+            const taskMap = new Map(checklistTasks.map(t => [t.id, t]))
+            const payload = selectedChecklistTaskIds.map(id => {
+                const t = taskMap.get(id)
+                return t ? { rowIndex: t.originalRowIndex, taskId: t.id, actualDate: actStr, remarks: remarkText } : null
+            }).filter(Boolean)
 
-            const startDateStr = formatDateTime(transferForm.startDate)
-            const endDateStr = formatDateTime(transferForm.endDate)
-            const remarkText = `Leave from ${startDateStr} to ${endDateStr}`
-
-            // OPTIMIZATION: Send all task updates in a single API call using the backend's 'updateTaskData' feature
-            const payloadTasks = selectedChecklistTaskIds.map(taskId => {
-                const task = checklistTasks.find(t => t.id === taskId)
-                if (!task) return null
-
-                return {
-                    rowIndex: task.originalRowIndex,
-                    taskId: task.id,
-                    actualDate: (() => {
-                        const d = new Date();
-                        const dd = String(d.getDate()).padStart(2, '0');
-                        const mm = String(d.getMonth() + 1).padStart(2, '0');
-                        const yyyy = d.getFullYear();
-                        const hh = String(d.getHours()).padStart(2, '0');
-                        const min = String(d.getMinutes()).padStart(2, '0');
-                        const ss = String(d.getSeconds()).padStart(2, '0');
-                        return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`;
-                    })(),
-                    remarks: remarkText
-                }
-            }).filter(t => t !== null)
-
-            const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({
-                    sheetName: CONFIG.CHECKLIST_SHEET_NAME,
-                    action: 'updateTaskData',
-                    rowData: JSON.stringify(payloadTasks)
+            // 🚀 STEP 1: OPTIMISTIC PATCH (Make it feel instant)
+            if (allChecklistRows) {
+                const updatedAllRows = [...allChecklistRows]
+                const remIdx = checklistHeaders.findIndex(h => h?.toString().toLowerCase().includes('remark'))
+                const actIdx = checklistHeaders.findIndex(h => h?.toString().toLowerCase().includes('actual'))
+                
+                payload.forEach(pt => {
+                    const idx = pt.rowIndex - 1
+                    if (updatedAllRows[idx]) {
+                        const row = updatedAllRows[idx]
+                        const cells = row.c ? [...row.c] : [...row]
+                        if (remIdx !== -1) { if (row.c) cells[remIdx] = { v: pt.remarks }; else cells[remIdx] = pt.remarks; }
+                        if (actIdx !== -1) { if (row.c) cells[actIdx] = { v: pt.actualDate }; else cells[actIdx] = pt.actualDate; }
+                        updatedAllRows[idx] = row.c ? { ...row, c: cells } : cells
+                    }
                 })
-            })
-
-            if (!response.ok) {
-                throw new Error("HTTP error " + response.status)
-            }
-            const result = await response.json()
-            if (!result.success) {
-                throw new Error(result.error || "Batch update failed on the server")
+                setAllChecklistRows(updatedAllRows)
             }
 
-            // Invalidate cache so fresh data is fetched next time
-            setAllChecklistRows(null)
+            // 🚀 STEP 2: UI FEEDBACK (Instant closing)
             setChecklistTasks([])
-
-            setSuccessMessage(`${selectedChecklistTaskIds.length} tasks transferred successfully!`)
-            setTimeout(() => setSuccessMessage(''), 3000)
             setShowTransferModal(false)
+            setSuccessMessage(`Submitting ${payload.length} tasks recorded on leave in background...`)
+            setTimeout(() => setSuccessMessage(''), 3000)
+
+            // 🚀 STEP 3: BACKGROUND SUBMIT (No user wait time)
+            // Using a slightly larger chunk (60) to avoid excessive boot-up calls for GAS
+            const CHUNK_SIZE = 60
+            for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+                const chunk = payload.slice(i, i + CHUNK_SIZE)
+                fetch(CONFIG.APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        sheetName: CONFIG.CHECKLIST_SHEET_NAME,
+                        action: 'updateTaskData',
+                        rowData: JSON.stringify(chunk)
+                    })
+                }).catch(err => console.error("Background sync failed:", err))
+            }
 
         } catch (e) {
             console.error(e)
-            alert("Error transferring tasks: " + e.message)
-        } finally {
-            setTransferring(false)
+            alert("Action failed. Please refresh.")
         }
     }
+
 
     // Submit only the Remarks column for a Leave row back to the Unique sheet
     const submitLeaveRemark = async (row) => {
@@ -1392,13 +1378,40 @@ function Settings() {
                                 <LogOut className="text-purple-600" size={20} />
                                 <h2 className="text-lg font-bold text-purple-800">Leave Management</h2>
                             </div>
-                            <button
-                                onClick={fetchLeaveData}
-                                className="p-2 text-purple-600 hover:bg-purple-100 rounded-full transition-colors"
-                                title="Refresh Data"
-                            >
-                                <RefreshCw size={18} className={leaveLoading ? 'animate-spin' : ''} />
-                            </button>
+                            <div className="flex items-center gap-4">
+                                <div className="relative group">
+                                    <User size={14} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-purple-400 pointer-events-none" />
+                                    <select
+                                        value={leaveNameFilter}
+                                        onChange={(e) => setLeaveNameFilter(e.target.value)}
+                                        className="pl-9 pr-8 py-1.5 border border-purple-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 text-[11px] bg-white/50 transition-all shadow-sm appearance-none cursor-pointer font-bold text-gray-700 min-w-[160px]"
+                                    >
+                                        <option value="">All Staff Members</option>
+                                        {(() => {
+                                            const headers = leaveData[0]?.headers || []
+                                            const nameIdx = headers.findIndex(h => {
+                                                const l = h?.toLowerCase() || ''
+                                                return l.includes('name') || l.includes('doer') || l.includes('user')
+                                            })
+                                            const idx = nameIdx !== -1 ? nameIdx : 3
+                                            const names = [...new Set(leaveData.slice(1).map(row => row.values[idx]?.toString().trim()).filter(Boolean))].sort()
+                                            return names.map(name => (
+                                                <option key={name} value={name}>{name}</option>
+                                            ))
+                                        })() || null}
+                                    </select>
+                                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none text-purple-400">
+                                        <ChevronDown size={14} />
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={fetchLeaveData}
+                                    className="p-2 text-purple-600 hover:bg-purple-100 rounded-full transition-colors"
+                                    title="Refresh Data"
+                                >
+                                    <RefreshCw size={18} className={leaveLoading ? 'animate-spin' : ''} />
+                                </button>
+                            </div>
                         </div>
 
                         <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: '60vh' }}>
@@ -1436,52 +1449,63 @@ function Settings() {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-100">
-                                            {uniqueLeaveRows.map((row, rowIndex) => {
-                                                const headers = leaveData[0]?.headers || []
-                                                const deptIdx = (() => {
-                                                    const i = headers.findIndex(h => h?.toLowerCase().includes('dept') || h?.toLowerCase().includes('department'))
-                                                    return i !== -1 ? i : 0
-                                                })()
-
-                                                const givenByIdx = (() => {
-                                                    const i = headers.findIndex(h => h?.toLowerCase().includes('given') || h?.toLowerCase().includes('assignee'))
-                                                    return i !== -1 ? i : 1
-                                                })()
-
-                                                const nameIdx = (() => {
-                                                    const i = headers.findIndex(h => {
+                                            {uniqueLeaveRows
+                                                .filter(row => {
+                                                    if (!leaveNameFilter) return true
+                                                    const headers = leaveData[0]?.headers || []
+                                                    const nameIdx = headers.findIndex(h => {
                                                         const l = h?.toLowerCase() || ''
                                                         return l.includes('name') || l.includes('doer') || l.includes('user')
                                                     })
-                                                    return i !== -1 ? i : 3
-                                                })()
+                                                    const idx = nameIdx !== -1 ? nameIdx : 3
+                                                    return row.values[idx]?.toString().trim() === leaveNameFilter
+                                                })
+                                                .map((row, rowIndex) => {
+                                                    const headers = leaveData[0]?.headers || []
+                                                    const deptIdx = (() => {
+                                                        const i = headers.findIndex(h => h?.toLowerCase().includes('dept') || h?.toLowerCase().includes('department'))
+                                                        return i !== -1 ? i : 0
+                                                    })()
 
-                                                const dept = row.values[deptIdx] || '—'
-                                                const givenBy = row.values[givenByIdx] || '—'
-                                                const name = row.values[nameIdx] || '—'
+                                                    const givenByIdx = (() => {
+                                                        const i = headers.findIndex(h => h?.toLowerCase().includes('given') || h?.toLowerCase().includes('assignee'))
+                                                        return i !== -1 ? i : 1
+                                                    })()
 
-                                                return (
-                                                    <tr
-                                                        key={row.id || rowIndex}
-                                                        className="hover:bg-purple-50/30 transition-colors group"
-                                                    >
-                                                        {/* Checkbox — opens transfer/leave modal */}
-                                                        <td className="px-3 py-3 text-center whitespace-nowrap">
-                                                            <input
-                                                                type="checkbox"
-                                                                className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation()
-                                                                    handleCheckboxClick(row)
-                                                                }}
-                                                            />
-                                                        </td>
-                                                        <td className="px-4 py-3 text-xs text-gray-700 font-medium whitespace-nowrap">{dept}</td>
-                                                        <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">{givenBy}</td>
-                                                        <td className="px-4 py-3 text-xs text-gray-900 font-semibold whitespace-nowrap">{name}</td>
-                                                    </tr>
-                                                )
-                                            })}
+                                                    const nameIdx = (() => {
+                                                        const i = headers.findIndex(h => {
+                                                            const l = h?.toLowerCase() || ''
+                                                            return l.includes('name') || l.includes('doer') || l.includes('user')
+                                                        })
+                                                        return i !== -1 ? i : 3
+                                                    })()
+
+                                                    const dept = row.values[deptIdx] || '—'
+                                                    const givenBy = row.values[givenByIdx] || '—'
+                                                    const name = row.values[nameIdx] || '—'
+
+                                                    return (
+                                                        <tr
+                                                            key={row.id || rowIndex}
+                                                            className="hover:bg-purple-50/30 transition-colors group"
+                                                        >
+                                                            {/* Checkbox — opens transfer/leave modal */}
+                                                            <td className="px-3 py-3 text-center whitespace-nowrap">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        handleCheckboxClick(row)
+                                                                    }}
+                                                                />
+                                                            </td>
+                                                            <td className="px-4 py-3 text-xs text-gray-700 font-medium whitespace-nowrap">{dept}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-700 whitespace-nowrap">{givenBy}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-900 font-semibold whitespace-nowrap">{name}</td>
+                                                        </tr>
+                                                    )
+                                                })}
                                         </tbody>
                                     </table>
                                 )
@@ -1510,7 +1534,7 @@ function Settings() {
                     const end = leaveHistoryEndDate ? new Date(leaveHistoryEndDate) : null
                     if (end) end.setHours(23, 59, 59, 999)
 
-                    const filtered = leaveHistoryData.filter(row => {
+                    const filteredRaw = leaveHistoryData.filter(row => {
                         // Filter by Name (exact match from dropdown)
                         if (leaveHistoryNameFilter && row.name !== leaveHistoryNameFilter) return false
                         
@@ -1523,6 +1547,21 @@ function Settings() {
                         }
                         return true
                     })
+
+                    // Deduplicate by Date (Day only) and Name
+                    const filtered = []
+                    const seen = new Set()
+                    for (const row of filteredRaw) {
+                        const dObj = parseDate(row.date)
+                        if (dObj) dObj.setHours(0, 0, 0, 0)
+                        const d = dObj ? dObj.getTime() : String(row.date).trim().toLowerCase()
+                        const n = String(row.name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+                        const key = `${d}|${n}`
+                        if (!seen.has(key)) {
+                            seen.add(key)
+                            filtered.push(row)
+                        }
+                    }
 
                     const uniqueNames = [...new Set(leaveHistoryData.map(row => row.name).filter(Boolean))].sort()
 
@@ -1650,25 +1689,17 @@ function Settings() {
                                         <table className="min-w-full divide-y divide-purple-100">
                                             <thead className="bg-purple-50/50 sticky top-0 z-20 backdrop-blur-md">
                                                 <tr>
-                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Date</th>
-                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Doer Name</th>
-                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Task ID</th>
-                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Task Description</th>
-                                                    <th className="px-6 py-4 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Leave Details (Remarks)</th>
+                                                    <th className="px-4 py-2.5 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Date</th>
+                                                    <th className="px-4 py-2.5 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Doer Name</th>
+                                                    <th className="px-4 py-2.5 text-left text-[10px] font-bold text-purple-700 uppercase tracking-widest border-b border-purple-100/50">Leave Details (Remarks)</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="bg-white divide-y divide-purple-50">
-                                                {filtered.map((row) => (
-                                                    <tr key={row.id} className="hover:bg-purple-50/40 transition-all duration-200 group">
-                                                        <td className="px-6 py-4 whitespace-nowrap text-[11px] text-gray-500 font-mono tracking-tight">{formatTableDate(row.date)}</td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-xs font-bold text-gray-800 group-hover:text-purple-700 transition-colors">{row.name || '—'}</td>
-                                                        <td className="px-6 py-4 whitespace-nowrap">
-                                                            <span className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded-md text-[10px] font-bold border border-purple-100">
-                                                                {row.taskId || '—'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-xs text-gray-600 max-w-xs overflow-hidden text-ellipsis leading-relaxed">{row.description || '—'}</td>
-                                                        <td className="px-6 py-4 text-xs text-gray-700 italic border-l-4 border-transparent group-hover:border-purple-400 group-hover:bg-purple-50/50 transition-all pl-6">
+                                                {filtered.map((row, index) => (
+                                                    <tr key={`${row.date}-${row.name}-${index}`} className="hover:bg-purple-50/40 transition-all duration-200 group">
+                                                        <td className="px-4 py-1.5 whitespace-nowrap text-[11px] text-gray-500 font-mono tracking-tight">{formatTableDate(row.date)}</td>
+                                                        <td className="px-4 py-1.5 whitespace-nowrap text-xs font-bold text-gray-800 group-hover:text-purple-700 transition-colors">{row.name || '—'}</td>
+                                                        <td className="px-4 py-1.5 text-xs text-gray-700 italic border-l-4 border-transparent group-hover:border-purple-400 group-hover:bg-purple-50/50 transition-all pl-4">
                                                             {row.remarks}
                                                         </td>
                                                     </tr>
@@ -1843,215 +1874,149 @@ function Settings() {
             }
 
             {/* Transfer/Leave Modal */}
-            {/* Transfer/Leave Modal */}
             {showTransferModal && transferTask && (() => {
-                // Robust date parser — handles ISO strings, DD/MM/YYYY, and
-                // Google Sheets' Date(year,month,day) serial format
-                // Robust date parser — handles ISO strings, DD/MM/YYYY, and
-                // Google Sheets' Date(year,month,day) serial format
-                const parseDate = (dateStr) => {
-                    if (!dateStr) return null
-                    const s = String(dateStr).trim()
-                    // Google Sheets format: Date(2025,0,15) — month is 0-based
-                    const gsMatch = s.match(/^Date\((\d+),(\d+),(\d+)\)$/)
-                    if (gsMatch) {
-                        return new Date(Number(gsMatch[1]), Number(gsMatch[2]), Number(gsMatch[3]))
-                    }
-                    // DD/MM/YYYY
-                    const dmyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
-                    if (dmyMatch) {
-                        return new Date(`${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`)
-                    }
-                    // ISO / standard
+                // Formatting helpers for the modal
+                const parseDateLocal = (s) => {
+                    if (!s || s === 'N/A') return null
+                    // Handle Google Sheets Date format or DD/MM/YYYY
+                    const gsMatch = s.toString().match(/^Date\((\d+),(\d+),(\d+)\)$/)
+                    if (gsMatch) return new Date(Number(gsMatch[1]), Number(gsMatch[2]), Number(gsMatch[3]))
+                    const dmyMatch = s.toString().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+                    if (dmyMatch) return new Date(`${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`)
                     const d = new Date(s)
                     return isNaN(d.getTime()) ? null : d
                 }
 
-                // Format a date value → "DD/MM/YYYY HH:MM:SS"
-                const formatDisplayDate = (dateStr) => {
-                    if (!dateStr || dateStr === 'N/A') return dateStr || 'N/A'
-                    const d = parseDate(dateStr)
-                    if (!d || isNaN(d.getTime())) return String(dateStr)
-                    const dd = String(d.getDate()).padStart(2, '0')
-                    const mm = String(d.getMonth() + 1).padStart(2, '0')
-                    const yyyy = d.getFullYear()
-                    const hh = String(d.getHours()).padStart(2, '0')
-                    const min = String(d.getMinutes()).padStart(2, '0')
-                    const ss = String(d.getSeconds()).padStart(2, '0')
-                    return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`
-                }
-
-                // Use an inline filter that is relatively fast but could be memoized
-                // We'll calculate it once per render within this block.
-                const filterStart = parseDate(transferForm.startDate)
-                const filterEnd = parseDate(transferForm.endDate)
+                // 🚀 OPTIMIZATION: Calculation once per modal render
+                const filterStart = parseDateLocal(transferForm.startDate)
+                const filterEnd = parseDateLocal(transferForm.endDate)
                 if (filterEnd) filterEnd.setHours(23, 59, 59, 999)
 
-                const filteredTasks = []
-                for (const task of checklistTasks) {
-                    if (!filterStart && !filterEnd) {
-                        filteredTasks.push(task)
-                        continue
-                    }
-                    const taskDate = parseDate(task.date)
-                    if (!taskDate) continue
+                const modalTasks = checklistTasks.filter(task => {
+                    if (task.userName !== transferForm.userName) return false
+                    if (!filterStart && !filterEnd) return true
+                    const taskDate = parseDateLocal(task.startDate || task.date)
+                    if (!taskDate) return false
+                    if (filterStart && filterEnd) return taskDate >= filterStart && taskDate <= filterEnd
+                    if (filterStart) return taskDate >= filterStart
+                    if (filterEnd) return taskDate <= filterEnd
+                    return true
+                })
 
-                    if (filterStart && filterEnd) {
-                        if (taskDate >= filterStart && taskDate <= filterEnd) filteredTasks.push(task)
-                    } else if (filterStart) {
-                        if (taskDate >= filterStart) filteredTasks.push(task)
-                    } else if (filterEnd) {
-                        if (taskDate <= filterEnd) filteredTasks.push(task)
-                    }
-                }
+                const selectedSet = new Set(selectedChecklistTaskIds)
+                const allSelected = modalTasks.length > 0 && modalTasks.every(t => selectedSet.has(t.id))
 
                 return (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                        <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setShowTransferModal(false)}></div>
+                        <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm" onClick={() => setShowTransferModal(false)}></div>
                         <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col" style={{ maxHeight: '90vh' }}>
                             {/* Header */}
-                            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white flex-shrink-0">
+                            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white">
                                 <h2 className="text-lg font-bold text-gray-800">
-                                    Transfer Tasks for <span className="text-purple-600">{transferTask.userName || transferTask.values[3] || "User"}</span>
+                                    Transfer Tasks for <span className="text-purple-600">{transferForm.userName || "User"}</span>
                                 </h2>
-                                <button
-                                    onClick={() => setShowTransferModal(false)}
-                                    className="text-gray-400 hover:text-gray-600 transition-colors"
-                                >
+                                <button onClick={() => setShowTransferModal(false)} className="text-gray-400 hover:text-gray-600">
                                     <X size={20} />
                                 </button>
                             </div>
 
-                            {/* Scrollable Body */}
+                            {/* Body */}
                             <div className="p-6 space-y-6 overflow-y-auto flex-1">
-
-                                {/* Dates */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Start Date</label>
+                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">From Date</label>
                                         <input
                                             type="date"
                                             value={transferForm.startDate}
                                             onChange={(e) => setTransferForm(prev => ({ ...prev, startDate: e.target.value }))}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">End Date</label>
+                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">To Date</label>
                                         <input
                                             type="date"
                                             value={transferForm.endDate}
                                             onChange={(e) => setTransferForm(prev => ({ ...prev, endDate: e.target.value }))}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
                                         />
                                     </div>
                                 </div>
 
-                                {/* Task List */}
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     <div className="flex items-center justify-between">
-                                        <h3 className="text-xs font-bold text-gray-700 uppercase">Tasks to Assign ({filteredTasks.length})</h3>
-                                        {selectedChecklistTaskIds.length > 0 && (
-                                            <span className="text-xs text-purple-600 font-medium">{selectedChecklistTaskIds.length} selected</span>
-                                        )}
-                                    </div>
-                                    <div className="border border-gray-200 rounded-lg overflow-hidden" style={{ maxHeight: '340px' }}>
-                                        <div className="overflow-auto" style={{ maxHeight: '340px' }}>
-                                            <table className="min-w-full divide-y divide-gray-200">
-                                                <thead className="bg-gray-50" style={{ position: 'sticky', top: 0, zIndex: 10 }}>
-                                                    <tr>
-                                                        <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500 uppercase w-10">
-                                                            <input
-                                                                type="checkbox"
-                                                                className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                                                onChange={(e) => {
-                                                                    if (e.target.checked) {
-                                                                        setSelectedChecklistTaskIds(filteredTasks.map(t => t.id))
-                                                                    } else {
-                                                                        setSelectedChecklistTaskIds([])
-                                                                    }
-                                                                }}
-                                                                checked={filteredTasks.length > 0 && selectedChecklistTaskIds.length === filteredTasks.length}
-                                                            />
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Task ID</th>
-                                                        <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Description</th>
-                                                        <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Date</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="bg-white divide-y divide-gray-100">
-                                                    {checklistLoading ? (
-                                                        <tr>
-                                                            <td colSpan={4} className="py-8 text-center text-gray-500">
-                                                                <Loader2 className="mx-auto h-6 w-6 animate-spin text-purple-600" />
-                                                                <p className="mt-2 text-xs">Loading tasks...</p>
-                                                            </td>
-                                                        </tr>
-                                                    ) : filteredTasks.length === 0 ? (
-                                                        <tr>
-                                                            <td colSpan={4} className="py-6 text-center text-xs text-gray-500">
-                                                                {checklistTasks.length === 0
-                                                                    ? "No checklist tasks found for this user."
-                                                                    : "No tasks match the selected date range."}
-                                                            </td>
-                                                        </tr>
-                                                    ) : (
-                                                        filteredTasks.map((task) => (
-                                                            <tr key={task.id} className={`hover:bg-gray-50 cursor-pointer ${selectedChecklistTaskIds.includes(task.id) ? 'bg-purple-50' : ''}`}
-                                                                onClick={() => {
-                                                                    setSelectedChecklistTaskIds(prev =>
-                                                                        prev.includes(task.id)
-                                                                            ? prev.filter(id => id !== task.id)
-                                                                            : [...prev, task.id]
-                                                                    )
-                                                                }}
-                                                            >
-                                                                <td className="px-4 py-3 text-center">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={selectedChecklistTaskIds.includes(task.id)}
-                                                                        onChange={() => { }}
-                                                                        className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                                                    />
-                                                                </td>
-                                                                <td className="px-4 py-3 text-xs font-medium text-gray-900">{task.id}</td>
-                                                                <td className="px-4 py-3 text-xs text-gray-600 max-w-xs truncate">{task.description}</td>
-                                                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDisplayDate(task.date)}</td>
-                                                            </tr>
-                                                        ))
-                                                    )}
-                                                </tbody>
-                                            </table>
+                                        <div className="flex items-center space-x-2">
+                                            <input
+                                                type="checkbox"
+                                                id="selAllMod"
+                                                className="w-4 h-4 rounded border-gray-300 text-purple-600"
+                                                checked={allSelected}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        const newIds = Array.from(new Set([...selectedChecklistTaskIds, ...modalTasks.map(t => t.id)]))
+                                                        setSelectedChecklistTaskIds(newIds)
+                                                    } else {
+                                                        const visibleIds = new Set(modalTasks.map(t => t.id))
+                                                        setSelectedChecklistTaskIds(prev => prev.filter(id => !visibleIds.has(id)))
+                                                    }
+                                                }}
+                                            />
+                                            <label htmlFor="selAllMod" className="text-xs font-bold text-gray-700 uppercase cursor-pointer">
+                                                Select Available ({modalTasks.length})
+                                            </label>
                                         </div>
                                     </div>
-                                </div>
 
+                                    <div className="border border-gray-100 rounded-lg overflow-hidden" style={{ maxHeight: '340px' }}>
+                                        <table className="min-w-full divide-y divide-gray-100">
+                                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                                <tr>
+                                                    <th className="w-10"></th>
+                                                    <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">ID</th>
+                                                    <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">Task</th>
+                                                    <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-400 uppercase">Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-50">
+                                                {checklistLoading ? (
+                                                    <tr><td colSpan={4} className="py-8 text-center"><Loader2 className="animate-spin h-5 w-5 mx-auto text-purple-500" /></td></tr>
+                                                ) : modalTasks.length === 0 ? (
+                                                    <tr><td colSpan={4} className="py-8 text-center text-xs text-gray-400">No tasks match criteria.</td></tr>
+                                                ) : (
+                                                    modalTasks.map((task) => (
+                                                        <tr key={task.id} className={`hover:bg-purple-50/30 transition-colors pointer-events-auto cursor-pointer ${selectedSet.has(task.id) ? 'bg-purple-50' : ''}`}
+                                                            onClick={() => {
+                                                                setSelectedChecklistTaskIds(prev =>
+                                                                    selectedSet.has(task.id) ? prev.filter(id => id !== task.id) : [...prev, task.id]
+                                                                )
+                                                            }}
+                                                        >
+                                                            <td className="px-4 py-3 text-center">
+                                                                <input type="checkbox" checked={selectedSet.has(task.id)} readOnly className="rounded border-gray-300 text-purple-600" />
+                                                            </td>
+                                                            <td className="px-4 py-3 text-xs font-mono text-gray-400">{task.id}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-600 max-w-xs truncate">{task.description}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-400">{task.startDate || task.date}</td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Footer */}
-                            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
-                                <span className="text-xs text-gray-500">
-                                    {selectedChecklistTaskIds.length === 0
-                                        ? 'No tasks selected'
-                                        : `${selectedChecklistTaskIds.length} task(s) selected`}
-                                </span>
-                                <div className="flex gap-3">
-                                    <button
-                                        onClick={() => setShowTransferModal(false)}
-                                        className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-white transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
+                            <div className="px-6 py-4 bg-gray-50 border-t flex justify-between items-center">
+                                <span className="text-xs font-bold text-gray-400">{selectedChecklistTaskIds.length} Selected</span>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setShowTransferModal(false)} className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700">Cancel</button>
                                     <button
                                         onClick={handleTransferSubmit}
-                                        disabled={transferring || selectedChecklistTaskIds.length === 0}
-                                        className={`px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2 ${selectedChecklistTaskIds.length === 0
-                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                            : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:opacity-90'
-                                            }`}
+                                        disabled={selectedChecklistTaskIds.length === 0}
+                                        className="px-6 py-2 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 disabled:bg-gray-200 transition-colors"
                                     >
-                                        {transferring ? <Loader2 size={16} className="animate-spin" /> : <span>⇆</span>}
-                                        Leave
+                                        Apply Leave
                                     </button>
                                 </div>
                             </div>
