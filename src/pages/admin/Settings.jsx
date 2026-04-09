@@ -56,7 +56,8 @@ function Settings() {
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date().toISOString().split('T')[0],
         remarks: '',
-        isChecked: false
+        isChecked: false,
+        userName: ''
     })
     const [transferring, setTransferring] = useState(false)
     const [checklistTasks, setChecklistTasks] = useState([])
@@ -506,6 +507,7 @@ function Settings() {
                         id: vals[taskIdIdx],
                         description: vals[descIdx],
                         date: vals[dateColIdx] || 'N/A',
+                        userName: userName,
                         originalRowIndex: idx + 2,
                         allValues: vals
                     }
@@ -548,7 +550,8 @@ function Settings() {
         setTransferForm({
             startDate: todayStr,
             endDate: todayStr,
-            isChecked: false
+            isChecked: false,
+            userName: userName
         })
         setSelectedChecklistTaskIds([])
         setShowTransferModal(true)
@@ -1967,7 +1970,7 @@ function Settings() {
                                         </div>
                                     </div>
 
-                                    <div className="border border-gray-100 rounded-lg overflow-hidden" style={{ maxHeight: '340px' }}>
+                                    <div className="border border-gray-100 rounded-lg overflow-hidden overflow-y-auto" style={{ maxHeight: '340px' }}>
                                         <table className="min-w-full divide-y divide-gray-100">
                                             <thead className="bg-gray-50 sticky top-0 z-10">
                                                 <tr>
@@ -1996,7 +1999,13 @@ function Settings() {
                                                             </td>
                                                             <td className="px-4 py-3 text-xs font-mono text-gray-400">{task.id}</td>
                                                             <td className="px-4 py-3 text-xs text-gray-600 max-w-xs truncate">{task.description}</td>
-                                                            <td className="px-4 py-3 text-xs text-gray-400">{task.startDate || task.date}</td>
+                                                            <td className="px-4 py-3 text-xs text-gray-400 font-medium">
+                                                                {(() => {
+                                                                    const d = parseDateLocal(task.date)
+                                                                    if (!d) return String(task.date || 'N/A')
+                                                                    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+                                                                })()}
+                                                            </td>
                                                         </tr>
                                                     ))
                                                 )}

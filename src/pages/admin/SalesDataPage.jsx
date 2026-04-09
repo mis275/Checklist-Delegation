@@ -431,16 +431,17 @@ function AccountDataPage() {
   }, []);
 
   // UPDATED: Parse Google Sheets date-time to handle DD/MM/YYYY HH:MM:SS format
-  const parseGoogleSheetsDateTime = (dateTimeStr) => {
+  const parseGoogleSheetsDateTime = (dateTimeStr, includeTime = true) => {
     if (!dateTimeStr) return "";
-    // If already in DD/MM/YYYY HH:MM:SS format, return as is
+    // If already in DD/MM/YYYY HH:MM:SS format and we want time, return as is
     if (
+      includeTime &&
       typeof dateTimeStr === "string" &&
       dateTimeStr.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/)
     ) {
       return dateTimeStr;
     }
-    // If in DD/MM/YYYY format (without time), return as is
+    // If already in DD/MM/YYYY format (without time), return as is
     if (
       typeof dateTimeStr === "string" &&
       dateTimeStr.match(/^\d{2}\/\d{2}\/\d{4}$/)
@@ -454,9 +455,8 @@ function AccountDataPage() {
         const year = Number.parseInt(match[1], 10);
         const month = Number.parseInt(match[2], 10);
         const day = Number.parseInt(match[3], 10);
-        return `${day.toString().padStart(2, "0")}/${(month + 1)
-          .toString()
-          .padStart(2, "0")}/${year}`;
+        const date = new Date(year, month, day);
+        return includeTime ? formatDateTimeToDDMMYYYY(date) : formatDateToDDMMYYYY(date);
       }
     }
     // Try to parse as a regular date
@@ -465,6 +465,7 @@ function AccountDataPage() {
       if (!isNaN(date.getTime())) {
         // Check if the original string contained time information
         if (
+          includeTime &&
           typeof dateTimeStr === "string" &&
           (dateTimeStr.includes(":") || dateTimeStr.includes("T"))
         ) {
@@ -964,7 +965,7 @@ function AccountDataPage() {
         };
 
         const columnHeaders = [
-          { id: "col0", label: "Timestamp", type: "string" },
+          { id: "col0", label: "Timestamp", type: "date_only" },
           { id: "col1", label: "Task ID", type: "string" },
           { id: "col2", label: "Firm", type: "string" },
           { id: "col3", label: "Given By", type: "string" },
@@ -987,10 +988,11 @@ function AccountDataPage() {
           if (
             header.type === "datetime" ||
             header.type === "date" ||
+            header.type === "date_only" ||
             (cellValue && String(cellValue).startsWith("Date("))
           ) {
             rowData[header.id] = cellValue
-              ? parseGoogleSheetsDateTime(String(cellValue))
+              ? parseGoogleSheetsDateTime(String(cellValue), header.type !== "date_only")
               : "";
           } else if (
             header.type === "number" &&
